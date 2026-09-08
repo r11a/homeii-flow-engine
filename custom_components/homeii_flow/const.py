@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "homeii_flow"
 NAME = "HOMEii Flow Engine"
-VERSION = "0.7.21"
+VERSION = "1.0.0-beta.1"
 
 MUSIC_ASSISTANT_SCHEMA_MIN = 63
 MUSIC_ASSISTANT_SCHEMA_VALIDATED = 63

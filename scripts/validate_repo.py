@@ -93,8 +93,6 @@ def main() -> None:
         raise SystemExit("manifest.json domain does not match folder name")
     if not manifest.get("version"):
         raise SystemExit("manifest.json must include version for a custom integration")
-    if manifest.get("version") != "0.7.21":
-        raise SystemExit("manifest.json must expose the HOMEii Flow Engine 0.7.21 contract")
     if manifest.get("dependencies") != ["music_assistant"]:
         raise SystemExit("manifest.json must require the Music Assistant integration")
     if manifest.get("config_flow") is not True:
@@ -111,7 +109,7 @@ def main() -> None:
 
     const_text = (component / "const.py").read_text(encoding="utf-8")
     runtime_text = (component / "runtime.py").read_text(encoding="utf-8")
-    if 'VERSION = "0.7.21"' not in const_text:
+    if f'VERSION = "{manifest["version"]}"' not in const_text:
         raise SystemExit("const.py and manifest.json versions must match")
     forbidden_runtime_paths = {
         "singular radio library command": '"radio": ["radio"]',

@@ -1,63 +1,187 @@
-# HOMEii Flow Engine
+<p align="center"><img src="logo.png" alt="HOMEii Flow" width="360"></p>
+<h1 align="center">HOMEii Flow Engine</h1>
+<p align="center"><strong>The connection between your music dashboard and your smart home.</strong><br>Music Assistant state, playback and home automation — through Home Assistant.</p>
+<p align="center"><img alt="Engine beta candidate" src="https://img.shields.io/badge/Engine-1.0.0--beta.1-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Preparation only" src="https://img.shields.io/badge/Status-not_released-555555"></p>
+<p align="center"><a href="https://github.com/r11a/homeii-music-flow">Music Flow card</a> · <a href="#installation">Installation</a> · <a href="#configuration-fields">Configuration</a> · <a href="#automations-you-can-build">Automations</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="docs/BETA_UPGRADE_HE.md">עברית</a></p>
 
-<p align="center">
-  <img src="logo.png" alt="HOMEii Flow Engine" width="360">
-</p>
+> [!IMPORTANT]
+> **Preparation branch, not a published release.** The planned pair is **Engine `1.0.0-beta.1` + card `6.0.0-beta.1`**. This repository remains private. Public visibility, release tags and downloadable beta assets require the owner's later publication decision. A beta label is not a production-readiness guarantee.
 
-HOMEii Flow Engine is the required Home Assistant backend integration for HOMEii Music Flow 6.
+> [!WARNING]
+> **Upgrading the card from 5.9.3 requires installing this Engine first.** The 6.0 card is not a standalone replacement JavaScript file. Keep 5.9.3 active until the Engine is installed, configured and loading successfully. Back up HA, the dashboard, resource URL and previous files before testing. The Engine can execute schedules, timers and volume rules even when the dashboard is closed.
 
-HOMEii Music Flow 6 treats the card as the premium visual interface and the Engine as the source of truth for backend state. The Engine owns queue/library proxying, artwork registration, grouping orchestration, schedules, statistics, volume policies, announcements, diagnostics, and Sendspin status.
+## One experience, two repositories
 
-## Current Scope
+| Component | What it does | Repository |
+|---|---|---|
+| Music Flow `6.0.0-beta.1` | Artwork-driven player, contextual wheels, library, queue, lyrics and touch interface | [HOMEii Music Flow](https://github.com/r11a/homeii-music-flow) |
+| Flow Engine `1.0.0-beta.1` | Required HA integration that connects the card and automations to MA | [HOMEii Flow Engine](https://github.com/r11a/homeii-flow-engine) |
 
-### 0.7.19 AI Radio DJ
+The Engine is **not an add-on or a Music Assistant server**. It does not replace MA or HA's official Music Assistant integration. The browser connects to HA; the Engine maintains authenticated MA access and shares useful state with the card. MA remains authoritative for players, media and queues.
 
-The card can list the hosts already configured in MA, read the current queue DJ,
-and explicitly enable or disable that DJ. The bridge allows only
-`ai_radio/hosts/list`, `ai_radio/queue_dj/status` and `ai_radio/queue_dj/set`;
-host authoring, model credentials and voice configuration remain in MA.
-Opening the card page does not start generation. A successful setting change is
-confirmed by rereading MA's queue DJ status. MA 2.11.0b1 exposes these commands;
-servers without the plugin/configuration show an unavailable state.
+```mermaid
+flowchart LR
+  Card[HOMEii Music Flow card] --> HA[Home Assistant / Flow Engine]
+  Automations[HA scripts and automations] --> HA
+  HA <--> MA[Music Assistant server]
+  MA <--> Providers[Music providers]
+  MA --> Players[Speakers and players]
+```
 
-### 0.7.18 playback services
+## What the Engine enables
 
-`homeii_flow.player_command` now accepts `command: seek` with `seek_position`
-in seconds, and `command: playback_speed` with `speed` from 0.5 to 3.0.
-Both resolve the player's active MA queue, including group ownership.
-Playback speed requires a current podcast episode or audiobook; ordinary music
-and empty queues are rejected with a descriptive validation error.
-These commands can be used by Home Assistant scripts and automations without
-an open card. The card shows speed controls only for supported spoken media.
+| Capability | Value for your home | Important boundary |
+|---|---|---|
+| Authenticated MA connection | A persistent server connection, player identity mapping and event updates shared through HA | MA URL/token stays in the integration config; HA admin access and backups still need protection |
+| Player controls | Play, pause, stop, next/previous, volume, mute and seek from the card or HA actions | Commands depend on player/media support; seek is not possible on every stream |
+| Queue state and actions | Complete paginated queue reads, active-queue ownership, transfer and mutations | The backend rejects inconsistent/partial snapshots rather than certifying them as complete |
+| Library and search | Albums, tracks, artists, playlists, radio and podcast reads with caching and pagination | Providers determine available catalogs and metadata; a cache is not proof of current connectivity |
+| Artwork and favorites | HA-mediated artwork access, favorite reads/writes and revisioned snapshots | No guarantee that every provider item has artwork or accepts library writes |
+| Multi-room | Group orchestration and fresh readback for command confirmation | Sustained group persistence and device-specific protocols remain beta test areas |
+| Timers and schedules | Sleep timers and scheduled playback without leaving a browser open | HA and MA must be running; this is not a safety-critical scheduler or guaranteed alarm system |
+| Volume policies | Stored player limits with visible controls and optional time windows | Applying a policy may change real speaker volume; test one player first |
+| Announcements | HA TTS media-source integration and MA announcement handling | Requires configured TTS and player support; audible resume behavior needs hardware testing |
+| Playback preferences | Autoplay, crossfade and supported MA defaults with validation/readback | Global defaults affect all MA players; per-queue controls are separate |
+| Spoken-media speed | 0.5–3.0 playback speed for supported podcasts/audiobooks | Ordinary music and unsupported media are rejected |
+| AI Radio DJ | List configured MA hosts and read/set queue DJ state | Requires MA 2.11 beta API/plugin/configuration; model credentials and host authoring stay in MA |
+| Sendspin relay | Authenticated transport for the card's This device playback | MA support and browser audio permissions still apply; mobile background behavior is not guaranteed |
+| Diagnostics and entities | Connection health, player/queue information, activity, schedules and policies visible in HA | Statistics are operational aids, not billing/auditing records |
+| Optional system screensaver | Artwork and now-playing information beyond the card's own screen | Separate frontend module; browser loading and device behavior require testing |
+
+## Requirements
+
+- Home Assistant with custom integrations enabled. HACS metadata declares `2025.1.0` as the floor; this does not certify every HA version since then. Use a current supported Core version for beta testing.
+- The **official Music Assistant HA integration** installed and loaded. It is declared as a dependency in this integration's manifest.
+- Music Assistant exposing **API schema 63 or newer**, with a valid MA API token. Development work covers MA 2.10/2.11 beta APIs; some earlier 2.10 builds are incompatible. The handshake checks schema, not just the displayed MA release name.
+- HA can reach the real MA HTTP(S) API/WebSocket address, including its port. Do not use an HA ingress page as the API URL.
+- At least one working MA player, exposed through the official integration, and the relevant provider/TTS/AI setup for optional features.
+- For development outside HA: Python 3.12+ is declared in `pyproject.toml`; running in HA uses HA's managed Python runtime.
+
+## Installation
+
+### Before a beta is published
+
+This repository currently contains a candidate branch only. Do not expect a release download or an automatically available HACS beta. Access to a private repository must be granted separately. The instructions below describe the intended install layout and the steps to use once an exact candidate/package is deliberately selected.
+
+### Manual installation
+
+1. Back up HA and any existing `custom_components/homeii_flow` directory.
+2. Obtain the exact Engine beta package/source commit intended for testing, not an unrelated moving branch.
+3. Copy **the `homeii_flow` directory inside `custom_components`** to `/config/custom_components/homeii_flow`.
+4. Verify this exact layout:
+
+```text
+/config/custom_components/homeii_flow/
+  __init__.py
+  manifest.json
+  config_flow.py
+  runtime.py
+  websocket_api.py
+  services.yaml
+  translations/
+  frontend/
+  ...other files from the package
+```
+
+5. `manifest.json` must be directly inside `homeii_flow`. Do not copy a repository ZIP as an integration, copy only one Python file, or create `homeii_flow/homeii_flow/manifest.json` accidentally.
+6. Run HA's configuration check, then **restart Home Assistant**.
+7. Go to **Settings → Devices & services → Add integration → HOMEii Flow Engine**.
+8. Fill the connection fields below and complete setup. Check for setup errors before installing the 6.0 card.
+
+### HACS installation after public availability is arranged
+
+Add `https://github.com/r11a/homeii-flow-engine` as a custom **Integration** repository, deliberately select the exact beta, download it and restart HA. Adding it in HACS installs files; it does **not** replace the Add integration/configuration steps. The matching [card repository](https://github.com/r11a/homeii-music-flow) is a separate **Dashboard** repository.
+
+For an existing development installation, retain its config entry, update the full component directory and restart. Do not delete the entry just to change the MA URL or token. The jump from development `0.7.21` to `1.0.0-beta.1` is beta version labeling; it does not intentionally reset stored schedules or profiles.
+
+## Configuration fields
+
+| Field | What to enter | Example / guidance |
+|---|---|---|
+| Instance ID | Stable Engine instance identifier | Leave `default` for a single installation |
+| Profile ID | Namespace for stored HOMEii schedules/settings | Leave `default` unless deliberately separating profiles; changing it can make another profile's records appear absent |
+| Music Assistant URL | MA server HTTP(S) base URL reachable **from HA** | `http://192.168.1.10:8095` is an example, not a universal port |
+| External MA URL | Optional external HTTPS server/API fallback | Use only if you have intentionally configured that route. It is not the HA dashboard/ingress URL and does not automatically solve browser audio restrictions |
+| MA API token | A valid Music Assistant API token | Create it in your MA installation; do not use an HA token or paste it into dashboard YAML, screenshots or issues |
+| Experimental features | Optional test features | Leave disabled for initial connection testing; it is not a remedy for an unsupported server schema |
+
+To update an existing connection: **Settings → Devices & services → HOMEii Flow Engine → Configure → General settings**. Leaving the token field blank in that edit flow preserves the saved token. Initial setup requires a token.
+
+Keep the official MA integration installed. First resolve failures in native MA; HOMEii cannot repair an offline provider or a speaker unsupported by MA.
+
+## Connect the card
+
+After the Engine loads, install the exact matching `6.0.0-beta.1` card. Configure connection credentials in the Engine only:
+
+```yaml
+type: custom:homeii-music-flow
+homeii_engine_mode: required
+```
+
+Do not load the old and new card scripts simultaneously. Run card diagnostics and confirm the Engine version, MA connection and selected player. The complete [5.9.3 upgrade guide](https://github.com/r11a/homeii-music-flow/blob/codex/v6-release-candidate/docs/BETA_GUIDE.md) explains resource changes, rollback and browser settings.
+
+## Entities you can use in HA
+
+The integration declares sensor, binary sensor, switch, button, number and calendar platforms. Entities depend on the configured profile and stored records; not every installation immediately has a schedule or a volume-rule entity.
+
+| Platform | Examples of exposed information/actions |
+|---|---|
+| Sensors | Engine/MA status, player counts, playing/grouped players, next schedule/timer and stored policy information |
+| Binary sensors | Playing/grouped state and active volume-policy status |
+| Switches | Stored schedules, timers, volume rules and system screensaver enablement |
+| Buttons | Refresh/orchestration, running a schedule now and showing the screensaver |
+| Numbers | Rule volume controls and screensaver timeout |
+| Calendar | Upcoming stored HOMEii schedules |
+
+Actual entity IDs are generated by HA and may have suffixes. Select them in the UI; do not assume an example entity ID exists in your installation.
+
+## Automations you can build
+
+Use **Developer tools → Actions** (called Services in older HA versions), or HA scripts. The following are action snippets, not complete trigger-based automations. Replace `media_player.kitchen` with your real MA entity. They can affect a real speaker immediately.
+
+### Seek to a position in a track
 
 ```yaml
 action: homeii_flow.player_command
 data:
   player: media_player.kitchen
-  command: playback_speed
-  speed: 1.25
+  command: seek
+  seek_position: 90
 ```
 
-Replace the example entity with the intended Music Assistant player. Live seek
-was checked on MA 2.11.0b1; audible spoken-media speed verification remains part
-of the release checklist.
+Position is in seconds and requires seekable media. For a supported podcast/audiobook use `command: playback_speed` and `speed: 1.25` instead.
 
-Version `0.7.17` makes Music Assistant (API schema 63 or newer) a required Home Assistant dependency and the authoritative backend for HOMEii Flow. The Engine owns the authenticated server handshake, registry-backed native player identity map, typed library/search reads, verified full queue snapshots and mutations, playback commands, stable artwork proxy, favorites, provider discovery caching and revisioned SWR caches. The API token stays in the Home Assistant config entry and is never serialized to the browser.
-
-Queue options are also available to Home Assistant automations through `homeii_flow.player_command`:
+### Set a 30-minute sleep timer
 
 ```yaml
-action: homeii_flow.player_command
+action: homeii_flow.set_timer
 data:
-  player: media_player.computer_2
-  command: crossfade
-  crossfade_enabled: true
+  profile_id: default
+  id: bedtime_kitchen
+  player: media_player.kitchen
+  action: stop
+  minutes: 30
+  enabled: true
 ```
 
-Use `command: autoplay` with `autoplay_enabled: true` for MA Autoplay. Explicit `false` disables either option. The Engine resolves a grouped player's active queue before dispatch; these options are validated in `queue_controls.py`. Announcement playback uses HA's TTS media source and MA's native announcement/resume behavior. The current local regression suite contains 47 passing checks; physical audio and hardware-specific behavior require live testing.
+Cancel with `homeii_flow.delete_timer`, `profile_id: default`, `id: bedtime_kitchen`. It is stored by the Engine and does not depend on the card staying open; HA must remain running to execute it.
 
+### Add an overnight volume limit
 
-Global Music Assistant playback defaults are exposed through an administrator service:
+```yaml
+action: homeii_flow.set_volume_rule
+data:
+  profile_id: default
+  player: media_player.kitchen
+  max_volume: 25
+  start_time: "22:00"
+  end_time: "07:00"
+  enabled: true
+```
+
+The rule can lower volume while active. Check your HA timezone and test its boundaries. Profile-wide `clear_volume_rules` removes all rules for that profile; prefer individual edits/deletion when that is the intent.
+
+### Set MA's global playback defaults deliberately
 
 ```yaml
 action: homeii_flow.set_queue_settings
@@ -67,53 +191,19 @@ data:
   smart_shuffle_enabled: enabled
 ```
 
-These defaults affect all MA players. Only fields supported by the connected server can be changed; omitted values are preserved, and every save is verified by readback. The same validation powers the card's Playback preferences screen. Per-queue commands above remain separate.
+This administrator action changes **global MA defaults**, not just one card/player. Only supported fields are accepted; unspecified fields remain unchanged and saved values are read back. Per-queue controls use `homeii_flow.player_command`, for example `command: crossfade` with `crossfade_enabled: true`.
 
-It provides:
+### Scheduling and other services
 
-- Home Assistant config flow
-- HOMEii Flow Engine WebSocket API
-- card context and capability discovery
-- diagnostics and statistics snapshots
-- persistent library snapshots that remain available across Home Assistant restarts
-- background library refreshes that never block a usable stale snapshot
-- coalesced identical library requests and bounded startup cache warming
-- persistent SWR detail caching for playlists, albums, artists, recommendations, history, and in-progress media
-- deterministic same-origin artwork URLs with browser/server revalidation
-- HA diagnostic/stat sensors
-- HA switch entities for stored schedules, one-shot timers and volume rules, so each backend action owns a visible HA control
-- HA buttons for refresh, orchestration, applying volume rules and running the next schedule on demand
-- HA binary sensors for playing/grouped player state and active volume policies
-- HA number entities for tuning each stored volume rule directly from Home Assistant
-- recent Engine activity visibility for diagnostics, dashboards and support troubleshooting
-- per-schedule `Run now` buttons for testing stored schedules from the integration page
-- a Home Assistant calendar entity that exposes stored HOMEii schedules as upcoming events
-- passive playback statistics and a system-wide screensaver agent foundation
+The Configure flow offers guided menus for stored schedules, timers and rules. `homeii_flow.set_schedule` accepts the player, local time, media and optional days/volume; `homeii_flow.run_schedule` tests a saved ID immediately. Check the [service definitions](custom_components/homeii_flow/services.yaml) for exact fields and units before writing an automation. Day indices use **Sunday = 0**. Use a valid media URI from your own MA library, not a made-up example URI.
 
-## System-wide screensaver
+Other actions include `play_media`, `transfer_queue`, `announce`, `delete_schedule`, `delete_volume_rule`, `run_orchestration`, `set_screensaver` and `show_screensaver`. Announcement/TTS configuration and the selected target matter; test on one speaker before expanding to rooms.
 
-HOMEii Flow Engine can serve a global dashboard screensaver agent:
+## Optional system screensaver
 
-```text
-/homeii_flow/homeii-flow-system-screensaver.js
-```
+The served frontend module is `/homeii_flow/homeii-flow-system-screensaver.js`. Add it as a JavaScript module resource and enable the System screensaver entity/setting only if wanted. It is separate from the card's own screensaver and may appear elsewhere in the HA dashboard.
 
-Add it as a Home Assistant Lovelace JavaScript module resource, then enable **System screensaver** on the HOMEii Flow Engine device page or call `homeii_flow.set_screensaver`.
-
-This is intentionally separate from the card DOM. Once the resource is loaded, the screensaver can appear on any dashboard page, even when the HOMEii Music Flow card is not visible.
-
-The integration also exposes:
-
-- `Show system screensaver now` button entity for an immediate one-time open request
-- `System screensaver timeout` number entity for changing the idle delay from the integration page
-- `homeii_flow.show_screensaver` service for automations/scripts
-- Now Playing display with live player artwork detection, Engine artwork fallback proxy, title, artist, album and player name when Music Assistant playback is active
-- dynamic album-art backdrop for the system screensaver, using the loaded artwork as a soft blurred background
-- system screensaver text cleanup that hides raw stream URLs and `Unknown` placeholders from the Now Playing title area
-- artwork proxy now checks the Music Assistant queue response and tries Music Assistant imageproxy paths before falling back to Home Assistant paths
-- playback statistics that refresh from the live player snapshot when HA reads the sensors, not only from the background tick
-
-For non-dashboard Home Assistant pages, Lovelace resources may not be loaded by Home Assistant. In that case add it as a frontend extra module instead:
+For non-dashboard HA pages, where Lovelace resources may not load, an advanced option is:
 
 ```yaml
 frontend:
@@ -121,141 +211,56 @@ frontend:
     - /homeii_flow/homeii-flow-system-screensaver.js
 ```
 
-Restart Home Assistant after changing `configuration.yaml`, then hard refresh the browser.
-- lightweight backend orchestration for schedules and volume policies
-- next-schedule and next-timer visibility with schedule/timer details on sensor attributes
-- active-player visibility for backend helpers, dashboards and automations
-- Music Assistant player snapshots for the card and diagnostics
-- backend playback proxy for Music Assistant/media_player playback
-- backend player command proxy for play/pause/stop/next/previous/volume/mute
-- queue/library proxy hooks
-- queue transfer proxy
-- group apply hook
-- stored schedules, timers and volume rules, exposed through WebSocket, services and the Configure flow
-- announcement and Sendspin status placeholders
+Merge into your existing `frontend` section rather than duplicating it. Check configuration, restart HA and refresh the browser. This optional module is not required for music playback.
 
-The integration is required for HOMEii Music Flow 6. The 6.x card intentionally has no frontend-only playback, queue, library, search or artwork fallback path. Users who do not want the Engine should remain on HOMEii Music Flow 5.9.x.
+## Diagnostics, permissions and privacy
 
-## Install Locally
+Run card Diagnostics and inspect the Engine integration/device page. Check MA handshake/schema, connected player identity, active queue, command errors and recent Engine activity. API secrets are kept in HA's config entry rather than serialized to the card; that does not make an HA backup safe to share publicly.
 
-Copy `custom_components/homeii_flow` into your Home Assistant `custom_components` folder, then restart Home Assistant.
+Card access uses authenticated HA routes. Administrative/global operations retain their own permission requirements; do not grant extra access simply to hide a permission error. Lyrics external lookup, AI services and music providers have separate privacy/cost behavior configured in their respective systems.
 
-After restart:
+The card/Engine WebSocket interface includes context, players, playback, queue, library, search, favorites, groups, schedules, timers, volume policies, announcements and Sendspin. Developers can inspect [registered commands](custom_components/homeii_flow/websocket_api.py); the beta API can still evolve, so prefer documented HA actions for user automations.
 
-1. Open **Settings > Devices & services**.
-2. Choose **Add Integration**.
-3. Search for **HOMEii Flow Engine**.
-4. Enter the preferred internal MA server URL, including its port (for example `http://192.168.1.10:8095`).
-5. Optionally enter an external HTTPS MA Web Server/API URL as a fallback. Do not use the Home Assistant ingress page.
-6. Paste a Music Assistant API token. The token is stored only in the HA config entry.
-7. Add the default instance.
-8. Keep the official **Music Assistant** Home Assistant integration installed and loaded. HOMEii uses it for HA entity discovery while the authenticated direct API supplies the complete queue, library and event stream.
-9. Open HOMEii Music Flow diagnostics and confirm the Engine, command bridge and realtime event stream all report connected.
+## Troubleshooting
 
-If the Engine was already configured, open **Settings > Devices & services > HOMEii Flow Engine > Configure > General settings**. Enter the URL and token there. Leaving the token field empty keeps the existing token.
+| Symptom | Check first |
+|---|---|
+| Integration not found | Full folder layout, a direct `manifest.json`, HA restart and custom integration logs |
+| Setup/authentication fails | MA API URL/port, reachability from HA, valid MA token, schema 63+ and official integration loaded |
+| Card says Engine required | Engine entry loaded, card resource version, HA authenticated connection; do not restore a frontend token workaround |
+| No players or wrong player | Native MA availability, official HA exposure, configured entity/profile and pinned/excluded filters |
+| Queue missing or slow | MA active queue ownership, Engine diagnostics and provider response; distinguish unavailable from empty |
+| Group dissolves | Compare the same grouping directly in MA and capture timestamps/model/protocol; this is a known beta investigation area |
+| No lyrics | Whether MA returns lyrics for that exact item; synchronization/lyrics are not universal |
+| This device fails | MA Sendspin support, secure access where required, a user audio gesture and browser permissions/background restrictions |
+| Timer/rule seems absent | Same profile/instance, HA timezone, enabled status and HA uptime |
+| Old version remains | Complete component update + HA restart for Engine; resource URL/cache + browser reload for card |
 
-## Card Configuration
+## Upgrade, rollback and beta expectations
 
-In HOMEii Music Flow 6, keep the Engine mode on `Required`:
+Back up before each candidate. Keep the old component directory and full HA backup together: restoring Python files alone may not restore changed configuration/storage. To return to card 5.9.3, restore its module, single resource URL and saved dashboard config. Disable beta-created Engine schedules/rules you no longer want; the card being closed or downgraded does not stop backend tasks. Do not hand-edit `.storage` as an improvised downgrade.
 
-```yaml
-type: custom:homeii-music-flow
-homeii_engine_mode: required
+The intended publication is **Pre-release, not Latest**. Users who enable betas or custom update automations can still get prereleases; the repository cannot disable those automations for them. Testers should select exact versions and disable automatic updates for these two components if they want manual control. No release/tag is created by this documentation preparation.
+
+Open beta areas include long-running groups, device-specific DLNA, Safari/iOS background audio, audible TTS resume, timing/recovery scenarios and the broader card layout matrix. AI DJ depends on configured MA support. No claim is made that all open community requests are implemented.
+
+## Reporting and contributing
+
+[Engine issues](https://github.com/r11a/homeii-flow-engine/issues) are for integration setup, backend behavior and services; [card issues](https://github.com/r11a/homeii-music-flow/issues) are for visual behavior and card navigation. The Engine tracker is visible only to permitted users while the repository is private.
+
+Report both HOMEii versions, HA and MA versions/schema, player model/protocol, provider, exact steps, expected/actual result, native MA comparison and redacted diagnostics. For announcements or groups specify the target speakers. Never post tokens, cookies or full backups.
+
+Validation commands:
+
+```sh
+python -B -m unittest discover -s tests
+python -B scripts/validate_repo.py
 ```
 
-If the Engine is not installed, loaded, or reachable through Home Assistant WebSocket, the card shows an Engine-required message instead of running through legacy browser-side paths.
+The preceding 0.7.21 source passed 52 regression tests and repository validation. Beta version labeling and package validation are checked separately; a passed unit suite does not certify every home installation. Runtime/state, MA transport, queue validation and Sendspin are separate responsibilities in the source, although `runtime.py` still needs further focused modularization.
 
-## WebSocket API
+## Identity and credits
 
-The card talks to the integration through Home Assistant WebSocket commands:
+HOMEii Flow uses the same gold wave mark in both projects. Root `icon.png`/`logo.png`, integration assets and screensaver assets retain their natural aspect ratio. README images link to local repository assets, so they do not depend on an unpublished tag. HA's integration-brand catalog is a separate publication process; placing icons in this repository alone does not guarantee every HA/HACS surface displays them.
 
-- `homeii_flow/get_context`
-- `homeii_flow/diagnostics/run`
-- `homeii_flow/stats/get`
-- `homeii_flow/players/get`
-- `homeii_flow/orchestration/status`
-- `homeii_flow/orchestration/run_once`
-- `homeii_flow/playback/play_media`
-- `homeii_flow/player/command`
-- `homeii_flow/queue/get`
-- `homeii_flow/queue/transfer`
-- `homeii_flow/library/get`
-- `homeii_flow/group/apply`
-- `homeii_flow/schedules/get`
-- `homeii_flow/schedules/set`
-- `homeii_flow/schedules/delete`
-- `homeii_flow/schedules/run`
-- `homeii_flow/timers/get`
-- `homeii_flow/timers/set`
-- `homeii_flow/timers/delete`
-- `homeii_flow/volume_rules/get`
-- `homeii_flow/volume_rules/set`
-- `homeii_flow/volume_rules/delete`
-- `homeii_flow/volume_rules/clear`
-- `homeii_flow/announce`
-- `homeii_flow/sendspin/status`
-
-## Home Assistant Entities
-
-After adding the integration, Home Assistant creates diagnostic/stat sensors for:
-
-- Engine status
-- Music Assistant players total
-- playing Music Assistant players
-- grouped Music Assistant players
-- Music Assistant players
-- stored schedules
-- next stored schedule time
-- stored timers
-- recent Engine activity
-- stored volume rules
-
-These are meant for dashboards, automations, and support diagnostics. HOMEii Music Flow 6.0.0 requires this integration and will not access Music Assistant directly from the browser.
-
-## Services
-
-Developer Tools > Services exposes:
-
-- `homeii_flow.set_volume_rule`
-- `homeii_flow.delete_volume_rule`
-- `homeii_flow.clear_volume_rules`
-- `homeii_flow.set_schedule`
-- `homeii_flow.delete_schedule`
-- `homeii_flow.run_schedule`
-- `homeii_flow.set_timer`
-- `homeii_flow.delete_timer`
-- `homeii_flow.play_media`
-- `homeii_flow.player_command`
-- `homeii_flow.transfer_queue`
-- `homeii_flow.announce`
-- `homeii_flow.run_orchestration`
-
-`run_schedule` is useful while testing because it runs one stored schedule immediately. `run_orchestration` runs one immediate schedule/volume-policy pass without waiting for the next 30-second Engine tick.
-
-You can also open **Settings > Devices & services > HOMEii Flow Engine > Configure** to add/delete schedules, timers and volume rules from a guided menu. Player choices there are limited to Music Assistant players.
-
-## Local Orchestration Test
-
-1. Create a volume rule for a real media player with `max_volume` lower than its current volume.
-2. Call `homeii_flow.run_orchestration`.
-3. Confirm Home Assistant lowers that player's volume.
-4. Check HOMEii Flow Engine diagnostics and confirm orchestration shows a recent `last_volume_action`.
-
-Schedule execution is also available, but it should be tested with a harmless media item first. The Engine executes it through the authenticated Music Assistant 2.10 queue API; there is no browser or Home Assistant media-player fallback.
-
-## Local Validation
-
-From this repository:
-
-```powershell
-python -m compileall custom_components\homeii_flow
-python scripts\validate_repo.py
-```
-
-The real runtime test is inside Home Assistant:
-
-1. Install the integration locally.
-2. Restart Home Assistant.
-3. Add HOMEii Flow Engine from Devices & services.
-4. Open HOMEii Music Flow diagnostics.
-5. Confirm `HOMEii Flow Engine` is `OK`.
+Built for Home Assistant and Music Assistant, with community feedback shaping the beta. See the [card repository](https://github.com/r11a/homeii-music-flow) for interface credits and community translations, including the German contribution by rtreichl.
