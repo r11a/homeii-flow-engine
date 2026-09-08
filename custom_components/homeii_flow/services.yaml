@@ -1,0 +1,638 @@
+set_volume_rule:
+  name: Set volume rule
+  description: Store a HOMEii Flow Engine volume rule for a profile/player.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    player:
+      name: Player
+      description: Media player entity id.
+      example: media_player.kitchen
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    max_volume:
+      name: Max volume
+      description: Maximum allowed volume percentage.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    start_time:
+      name: Start time
+      description: Optional HH:MM start time.
+      example: "22:00"
+      selector:
+        text:
+    end_time:
+      name: End time
+      description: Optional HH:MM end time.
+      example: "07:00"
+      selector:
+        text:
+    days:
+      name: Days
+      description: Optional weekday indexes, Sunday=0.
+      selector:
+        object:
+    enabled:
+      name: Enabled
+      description: Whether this volume rule is active.
+      default: true
+      selector:
+        boolean:
+
+clear_volume_rules:
+  name: Clear volume rules
+  description: Clear stored HOMEii Flow Engine volume rules for a profile.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+
+delete_volume_rule:
+  name: Delete volume rule
+  description: Delete one stored HOMEii Flow Engine volume rule for a profile/player.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    player:
+      name: Player
+      description: Media player entity id.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+
+set_schedule:
+  name: Set schedule
+  description: Store or update a HOMEii Flow Engine playback schedule.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    id:
+      name: Schedule ID
+      description: Optional stable id. Leave empty to create a new schedule.
+      example: morning_kitchen
+      selector:
+        text:
+    name:
+      name: Name
+      description: Friendly schedule name.
+      example: Morning kitchen playlist
+      selector:
+        text:
+    player:
+      name: Player
+      description: Media player entity id.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    media_id:
+      name: Media ID
+      description: Media or library id to play. Leave empty to let the Engine choose a playlist.
+      selector:
+        text:
+    media_mode:
+      name: Media mode
+      description: Use selected for a fixed media id, or random_playlist to let the Engine choose a playlist when the schedule runs.
+      default: selected
+      selector:
+        select:
+          options:
+            - selected
+            - random_playlist
+    media_type:
+      name: Media type
+      description: Media type, for example playlist, album, radio, track, or music.
+      example: playlist
+      selector:
+        select:
+          options:
+            - music
+            - playlist
+            - album
+            - artist
+            - track
+            - radio
+    enqueue:
+      name: Enqueue
+      description: Music Assistant enqueue mode for the scheduled playback.
+      default: play
+      selector:
+        select:
+          options:
+            - play
+            - add
+            - next
+            - replace
+            - shuffle
+    retry_attempts:
+      name: Retry attempts
+      description: Number of backend playback attempts when a scheduled action does not start immediately.
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 12
+          mode: box
+    retry_delay:
+      name: Retry delay
+      description: Seconds to wait between scheduled playback attempts.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box
+    time:
+      name: Time
+      description: Local time in HH:MM format.
+      required: true
+      example: "07:30"
+      selector:
+        time:
+    days:
+      name: Days
+      description: Optional weekday indexes, Sunday=0.
+      selector:
+        object:
+    volume:
+      name: Volume
+      description: Optional playback volume percentage.
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    enabled:
+      name: Enabled
+      description: Whether this schedule is active.
+      default: true
+      selector:
+        boolean:
+
+delete_schedule:
+  name: Delete schedule
+  description: Delete a stored HOMEii Flow Engine schedule by id.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    id:
+      name: Schedule ID
+      description: Schedule id to delete.
+      required: true
+      selector:
+        text:
+
+run_schedule:
+  name: Run schedule now
+  description: Run a stored HOMEii Flow Engine schedule immediately. Useful for testing a wake schedule without waiting for its time.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    id:
+      name: Schedule ID
+      description: Schedule id to run now.
+      required: true
+      selector:
+        text:
+
+set_timer:
+  name: Set timer
+  description: Store or update a HOMEii Flow Engine one-shot timer. The Engine executes it even when the dashboard/card is closed.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    id:
+      name: Timer ID
+      description: Optional stable id. Leave empty to use one sleep timer per player/profile.
+      example: sleep_kitchen
+      selector:
+        text:
+    player:
+      name: Player
+      description: Media player entity id.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    action:
+      name: Action
+      description: What to do when the timer expires.
+      default: stop
+      selector:
+        select:
+          options:
+            - stop
+            - pause
+    minutes:
+      name: Minutes
+      description: Minutes from now until the timer fires.
+      selector:
+        number:
+          min: 1
+          max: 1440
+          mode: box
+    ends_at:
+      name: Ends at
+      description: Optional ISO timestamp. Usually the card fills this automatically.
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: Whether this timer is active.
+      default: true
+      selector:
+        boolean:
+
+delete_timer:
+  name: Delete timer
+  description: Delete a stored HOMEii Flow Engine timer by id or player.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    id:
+      name: Timer ID
+      description: Timer id to delete.
+      selector:
+        text:
+    player:
+      name: Player
+      description: Optional player whose timer should be removed.
+      selector:
+        entity:
+          domain: media_player
+
+announce:
+  name: Announce
+  description: Send an announcement through HOMEii Flow Engine and record it in the activity log.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    message:
+      name: Message
+      description: Announcement text.
+      required: true
+      selector:
+        text:
+    player:
+      name: Player
+      description: Optional target media player entity id.
+      selector:
+        entity:
+          domain: media_player
+    players:
+      name: Players
+      description: Optional list of target media player entity ids.
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    volume:
+      name: Volume
+      description: Optional announcement volume percentage.
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    language:
+      name: Language
+      description: Optional TTS language code.
+      selector:
+        text:
+    tts_entity:
+      name: TTS entity
+      description: Optional TTS provider entity for tts.speak.
+      selector:
+        entity:
+          domain: tts
+
+play_media:
+  name: Play media
+  description: Play media through HOMEii Flow Engine. The Engine tries Music Assistant first and falls back to media_player.play_media.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    player:
+      name: Player
+      description: Media player entity id.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    media_id:
+      name: Media ID
+      description: Music Assistant URI or media id.
+      required: true
+      selector:
+        text:
+    media_type:
+      name: Media type
+      description: Media type, for example playlist, album, track, radio, or music.
+      default: music
+      selector:
+        select:
+          options:
+            - music
+            - playlist
+            - album
+            - artist
+            - track
+            - radio
+    enqueue:
+      name: Enqueue
+      description: Music Assistant enqueue mode.
+      default: play
+      selector:
+        select:
+          options:
+            - play
+            - add
+            - next
+            - replace
+            - shuffle
+    radio_mode:
+      name: Radio mode
+      description: Ask Music Assistant to continue similar tracks when supported.
+      default: false
+      selector:
+        boolean:
+
+player_command:
+  name: Player command
+  description: Run a media player command through HOMEii Flow Engine.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    player:
+      name: Player
+      description: Media player entity id.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    command:
+      name: Command
+      description: Player command to run.
+      required: true
+      selector:
+        select:
+          options:
+            - play
+            - pause
+            - stop
+            - next
+            - previous
+            - clear_playlist
+            - shuffle
+            - volume_set
+            - mute
+            - unmute
+            - autoplay
+            - crossfade
+            - seek
+            - playback_speed
+    seek_position:
+      name: Position in seconds
+      description: Seek within the active Music Assistant queue item.
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    speed:
+      name: Playback speed
+      description: Playback speed on the active queue (1 is normal speed).
+      selector:
+        number:
+          min: 0.5
+          max: 3
+          step: 0.05
+          mode: box
+    autoplay_enabled:
+      name: Autoplay
+      description: Continue playback using the Music Assistant Autoplay configuration.
+      selector:
+        boolean:
+    crossfade_enabled:
+      name: Crossfade
+      description: Enable smooth transitions on the active Music Assistant queue.
+      selector:
+        boolean:
+    volume:
+      name: Volume
+      description: Volume percentage for volume_set.
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    shuffle:
+      name: Shuffle
+      description: Shuffle value for shuffle command.
+      default: true
+      selector:
+        boolean:
+
+transfer_queue:
+  name: Transfer queue
+  description: Transfer a Music Assistant queue from one player to another.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    source_player:
+      name: Source player
+      description: Player currently owning the queue.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    target_player:
+      name: Target player
+      description: Player that should receive the queue.
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    auto_play:
+      name: Auto play
+      description: Start playback on the target player after transfer.
+      default: true
+      selector:
+        boolean:
+
+run_orchestration:
+  name: Run orchestration
+  description: Run one HOMEii Flow Engine schedule and volume-policy pass immediately.
+  fields: {}
+
+set_screensaver:
+  name: Set system screensaver
+  description: Configure the HOMEii Flow system-wide dashboard screensaver. Add /homeii_flow/homeii-flow-system-screensaver.js as a Lovelace JavaScript module resource to activate it on all dashboard pages.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: Whether the system-wide screensaver agent should activate after idle time.
+      selector:
+        boolean:
+    timeout_seconds:
+      name: Timeout seconds
+      description: Idle time before the system screensaver opens.
+      selector:
+        number:
+          min: 15
+          max: 3600
+          mode: box
+    mode:
+      name: Mode
+      description: Auto uses lyrics-style now playing while music plays, otherwise clock.
+      selector:
+        select:
+          options:
+            - auto
+            - clock
+            - lyrics
+    auto_lyrics_when_playing:
+      name: Auto lyrics while playing
+      description: In auto mode, prefer the now-playing/lyrics style when music is active.
+      selector:
+        boolean:
+    clock_mode:
+      name: Clock mode
+      description: Preferred clock style for the system screensaver.
+      selector:
+        select:
+          options:
+            - digital
+            - analog
+    message:
+      name: Message
+      description: Optional short message shown on the system screensaver.
+      selector:
+        text:
+    show_artwork:
+      name: Show artwork
+      description: Reserved for richer artwork mode.
+      selector:
+        boolean:
+
+show_screensaver:
+  name: Show system screensaver
+  description: Request all loaded HOMEii Flow system screensaver browser agents to open immediately. The browser agent must be loaded as a Lovelace resource or frontend extra module.
+  fields:
+    profile_id:
+      name: Profile ID
+      description: HOMEii profile id.
+      example: default
+      selector:
+        text:
+    source:
+      name: Source
+      description: Optional label stored in diagnostics/activity for this request.
+      example: service
+      selector:
+        text:
+
+set_queue_settings:
+  name: Set playback preferences
+  description: Change shared Music Assistant playback preferences for all players. Only supplied fields change. Values are validated and read back from MA; requires administrator access.
+  fields:
+    autoplay_enabled:
+      name: Autoplay by default
+      selector:
+        boolean:
+    autoplay_mode:
+      name: Autoplay source
+      selector:
+        select:
+          options: [auto, similar, library, playlist]
+    autoplay_playlist:
+      name: Autoplay playlist URI
+      selector:
+        text:
+    smart_shuffle_enabled:
+      name: Smart Shuffle
+      selector:
+        select:
+          options: [enabled, disabled]
+    smart_shuffle_optimize_smart_fades:
+      name: Optimize order for Smart Fades
+      selector:
+        select:
+          options: [enabled, disabled]
+    crossfade_enabled:
+      name: Crossfade by default
+      selector:
+        boolean:
+    crossfade_mode:
+      name: Transition style
+      selector:
+        select:
+          options: [standard_crossfade, smart_crossfade]
+    crossfade_duration:
+      name: Standard transition duration
+      selector:
+        number:
+          min: 1
+          max: 15
+          step: 1
+          unit_of_measurement: s

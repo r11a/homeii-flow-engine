@@ -1,0 +1,138 @@
+{
+  "title": "HOMEii Flow Engine",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HOMEii Flow Engine",
+        "description": "Create the required HOMEii Flow 6 backend integration. HOMEii Music Flow 6 uses this Engine for playback, queue, library, artwork, schedules, statistics and diagnostics.",
+        "data": {
+          "name": "Name",
+          "instance_id": "Instance ID",
+          "profile_id": "Default profile ID",
+          "music_assistant_url": "Music Assistant server URL",
+          "music_assistant_external_url": "Music Assistant external HTTPS URL",
+          "music_assistant_token": "Music Assistant API token",
+          "enable_experimental": "Enable experimental features"
+        },
+        "data_description": {
+          "music_assistant_url": "Required Music Assistant 2.10 server URL. Example: http://192.168.1.10:8095.",
+          "music_assistant_external_url": "Optional HTTPS Web Server/API URL used for artwork when the internal address is unavailable. Do not use the Home Assistant ingress page.",
+          "music_assistant_token": "Stored only in the Home Assistant config entry and never sent to the browser."
+        }
+      }
+    },
+    "error": {
+      "required": "This field is required",
+      "invalid_url": "Enter a complete http:// or https:// Music Assistant URL, including its port.",
+      "invalid_external_url": "Enter a complete https:// Music Assistant Web Server/API URL.",
+      "invalid_auth": "Music Assistant rejected the API token.",
+      "cannot_connect": "Could not connect to the Music Assistant API.",
+      "invalid_response": "Music Assistant returned an invalid API response.",
+      "unsupported_ma_version": "Music Assistant 2.10 or newer is required.",
+      "runtime_unavailable": "HOMEii Flow Engine runtime is not loaded yet.",
+      "no_music_assistant_players": "No Music Assistant players were detected.",
+      "no_volume_rules": "No volume rules are configured.",
+      "no_schedules": "No schedules are configured.",
+      "invalid_days": "Days must be comma separated numbers from 0 to 6, where Sunday is 0."
+    },
+    "abort": {
+      "already_configured": "This HOMEii Flow Engine instance is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HOMEii Flow Engine options",
+        "data": {
+          "action": "Action"
+        },
+        "data_description": {
+          "action": "Choose what you want to manage."
+        }
+      },
+      "general": {
+        "title": "General settings",
+        "data": {
+          "profile_id": "Default profile ID",
+          "music_assistant_url": "Music Assistant server URL",
+          "music_assistant_external_url": "Music Assistant external HTTPS URL",
+          "music_assistant_token": "Replace Music Assistant API token",
+          "enable_experimental": "Enable experimental features"
+        },
+        "data_description": {
+          "music_assistant_external_url": "Optional HTTPS fallback. Do not use the Home Assistant ingress page.",
+          "music_assistant_token": "Leave blank to keep the currently stored token."
+        }
+      },
+      "add_volume_rule": {
+        "title": "Add volume rule",
+        "description": "Only Music Assistant players are shown.",
+        "data": {
+          "player": "Music Assistant player",
+          "max_volume": "Max volume",
+          "start_time": "Start time",
+          "end_time": "End time",
+          "days": "Days",
+          "enabled": "Enabled"
+        },
+        "data_description": {
+          "days": "Optional comma separated weekday numbers, Sunday=0. Example: 0,1,2"
+        }
+      },
+      "delete_volume_rule": {
+        "title": "Delete volume rule",
+        "data": {
+          "player": "Volume rule"
+        }
+      },
+      "add_schedule": {
+        "title": "Add schedule",
+        "description": "Only Music Assistant players are shown.",
+        "data": {
+          "id": "Schedule ID",
+          "name": "Name",
+          "player": "Music Assistant player",
+          "media_id": "Media ID",
+          "media_type": "Media type",
+          "time": "Time",
+          "days": "Days",
+          "volume": "Volume",
+          "enabled": "Enabled"
+        },
+        "data_description": {
+          "id": "Optional stable ID. Leave empty to create one automatically.",
+          "time": "Local HH:MM time.",
+          "days": "Optional comma separated weekday numbers, Sunday=0. Example: 0,1,2"
+        }
+      },
+      "delete_schedule": {
+        "title": "Delete schedule",
+        "data": {
+          "id": "Schedule"
+        }
+      },
+      "run_schedule": {
+        "title": "Run schedule now",
+        "description": "Runs a stored schedule immediately. Use this to test whether the stored player/media payload works.",
+        "data": {
+          "id": "Schedule"
+        }
+      }
+    },
+    "error": {
+      "required": "This field is required",
+      "invalid_url": "Enter a complete http:// or https:// Music Assistant URL, including its port.",
+      "invalid_external_url": "Enter a complete https:// Music Assistant Web Server/API URL.",
+      "invalid_auth": "Music Assistant rejected the API token.",
+      "cannot_connect": "Could not connect to the Music Assistant API.",
+      "invalid_response": "Music Assistant returned an invalid API response.",
+      "unsupported_ma_version": "Music Assistant 2.10 or newer is required.",
+      "runtime_unavailable": "HOMEii Flow Engine runtime is not loaded yet.",
+      "no_music_assistant_players": "No Music Assistant players were detected.",
+      "no_volume_rules": "No volume rules are configured.",
+      "no_schedules": "No schedules are configured.",
+      "schedule_run_failed": "The selected schedule was found but playback failed. Check the integration diagnostics for the last schedule action.",
+      "invalid_days": "Days must be comma separated numbers from 0 to 6, where Sunday is 0."
+    }
+  }
+}

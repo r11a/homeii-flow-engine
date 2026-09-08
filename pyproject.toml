@@ -1,0 +1,16 @@
+[project]
+name = "homeii-flow-engine"
+version = "0.7.21"
+description = "Required Home Assistant backend engine for HOMEii Music Flow 6."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "HOMEii" }]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

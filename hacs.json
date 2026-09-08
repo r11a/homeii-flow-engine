@@ -1,0 +1,7 @@
+{
+  "name": "HOMEii Flow Engine",
+  "render_readme": true,
+  "domains": ["homeii_flow"],
+  "homeassistant": "2025.1.0"
+}
+
