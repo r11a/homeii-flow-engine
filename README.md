@@ -11,6 +11,34 @@
 > **Upgrading the card from 5.9.3 requires installing this Engine first.** The 6.0 card is not a standalone replacement JavaScript file. Keep 5.9.3 active until the Engine is installed, configured and loading successfully. Back up HA, the dashboard, resource URL and previous files before testing. The Engine can execute schedules, timers and volume rules even when the dashboard is closed.
 
 
+## Install the Engine — start here
+
+**BETA: back up Home Assistant first. Install the Engine before upgrading the card from 5.9.3.**
+
+### 1. Download with HACS
+
+[![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=r11a&repository=homeii-flow-engine&category=integration)
+
+HACS must already be installed. This is a **custom repository**, not an official HACS default listing. If the button cannot find it, open **HACS → ⋮ → Custom repositories**, add `https://github.com/r11a/homeii-flow-engine`, choose **Integration**, and add it. Open HOMEii Flow Engine, select/download **1.0.0-beta.1** (enable beta/pre-release versions if needed), then **restart Home Assistant**. The button opens HACS; it does not silently install anything.
+
+### 2. Add and configure the integration after restarting
+
+[![Add integration](https://my.home-assistant.io/badges/config_flow.svg)](https://my.home-assistant.io/redirect/config_flow/?domain=homeii_flow)
+
+Or go to **Settings → Devices & services → Add integration → HOMEii Flow Engine**.
+
+- **Automatic:** enter the direct Music Assistant server URL and your MA built-in username/password to create a dedicated token. These are not your HA credentials; the password is not stored.
+- **Manual:** create a long-lived token in **Music Assistant → Settings → Profile**, then paste it into the Engine form.
+- Use your actual MA server address, for example `http://YOUR-MA-HOST:8095`. Do not paste the HA sidebar/ingress page URL.
+- Keep **Instance ID** and **Default Profile ID** as `default` for a standard installation. They identify this Engine connection and its default saved profile.
+- Confirm the integration loads before installing the matching card.
+
+If My Home Assistant opens the wrong server, change its instance URL to your own HA address. If the integration is not found, confirm the files were installed and HA was restarted.
+
+### Manual installation without HACS
+
+Download [homeii-flow-engine-1.0.0-beta.1.zip](https://github.com/r11a/homeii-flow-engine/releases/download/v1.0.0-beta.1/homeii-flow-engine-1.0.0-beta.1.zip), extract it, and copy the complete `custom_components/homeii_flow` folder into `/config/custom_components/`. The resulting file must be `/config/custom_components/homeii_flow/manifest.json`. Restart HA, then use **Add integration** above. Do not create an extra nested `custom_components` directory.
+
 ## Artwork lighting and listening insights (local beta candidate)
 
 The Engine can maintain **per-player artwork lighting while the dashboard is closed**. Assign existing color-capable HA lights in the card's Smart Home settings, select the corresponding player, open **Players → Lighting follow**, and enable it. The Engine saves that player's assignment; enable additional players individually. Its `lighting/get` and `lighting/set` WebSocket commands return the stored rules and current status. Restarting HA preserves assignments. The card stops issuing parallel browser-side lighting commands when this capability is available.
@@ -290,4 +318,5 @@ The Smart screen also edits the existing system screensaver and artwork-lighting
 Choose Automatic to create a dedicated token using your Music Assistant built-in username and password (not your Home Assistant credentials). The password is not stored. Alternatively choose Manual and paste a long-lived token from Music Assistant Settings → Profile. HA ingress URLs are rejected with guidance to use the direct MA server address. Keep Instance ID and Default Profile ID as default for a standard single installation.
 
 [Beginner installation and rollback guide](https://github.com/r11a/homeii-music-flow/blob/v6.0.0-beta.1/docs/INSTALL_STEP_BY_STEP.md).
+
 
