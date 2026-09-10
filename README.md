@@ -1,14 +1,25 @@
 <p align="center"><img src="logo.png" alt="HOMEii Flow" width="360"></p>
 <h1 align="center">HOMEii Flow Engine</h1>
 <p align="center"><strong>The connection between your music dashboard and your smart home.</strong><br>Music Assistant state, playback and home automation — through Home Assistant.</p>
-<p align="center"><img alt="Engine beta candidate" src="https://img.shields.io/badge/Engine-1.0.0--beta.1-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Preparation only" src="https://img.shields.io/badge/Status-not_released-555555"></p>
+<p align="center"><img alt="Engine beta candidate" src="https://img.shields.io/badge/Engine-1.0.0--beta.1-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Public beta" src="https://img.shields.io/badge/Status-PUBLIC_BETA-c89b56"></p>
 <p align="center"><a href="https://github.com/r11a/homeii-music-flow">Music Flow card</a> · <a href="#installation">Installation</a> · <a href="#configuration-fields">Configuration</a> · <a href="#automations-you-can-build">Automations</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="docs/BETA_UPGRADE_HE.md">עברית</a></p>
 
 > [!IMPORTANT]
-> **Preparation branch, not a published release.** The planned pair is **Engine `1.0.0-beta.1` + card `6.0.0-beta.1`**. This repository remains private. Public visibility, release tags and downloadable beta assets require the owner's later publication decision. A beta label is not a production-readiness guarantee.
+> **Public beta: Engine `1.0.0-beta.1` + card `6.0.0-beta.1`.** Install the Engine first. This is an opt-in prerelease, not a production-readiness guarantee.
 
 > [!WARNING]
 > **Upgrading the card from 5.9.3 requires installing this Engine first.** The 6.0 card is not a standalone replacement JavaScript file. Keep 5.9.3 active until the Engine is installed, configured and loading successfully. Back up HA, the dashboard, resource URL and previous files before testing. The Engine can execute schedules, timers and volume rules even when the dashboard is closed.
+
+
+## Artwork lighting and listening insights (local beta candidate)
+
+The Engine can maintain **per-player artwork lighting while the dashboard is closed**. Assign existing color-capable HA lights in the card's Smart Home settings, select the corresponding player, open **Players → Lighting follow**, and enable it. The Engine saves that player's assignment; enable additional players individually. Its `lighting/get` and `lighting/set` WebSocket commands return the stored rules and current status. Restarting HA preserves assignments. The card stops issuing parallel browser-side lighting commands when this capability is available.
+
+The controller listens to player state changes and reconciles every 10 seconds. It reads artwork through HA's media-player image interface, extracts a representative color in an executor, and sends color/brightness through HA light services. Maximum brightness follows the configured limit and player volume. A cooldown avoids repeated light commands; stale downloads cannot apply a previous track's colors. Unsupported/offline lights are reported as partial results. Disabling follow stops future updates; it does not turn lights off or restore a prior scene. A light cannot follow two enabled player assignments simultaneously. This is artwork-color following, **not beat detection**. Physical-light validation remains part of beta acceptance.
+
+Listening insights use the existing Engine history, not browser-open time. The card shows today's listening minutes, sessions, per-player totals and the most active player. HA already receives **Playback today**, **Playback sessions today**, and **Top player today** sensors for dashboards and automations. Totals sum player activity and may count simultaneous playback on multiple players.
+
+Radio Browser station queries can also run through the Engine (`radio/search`). Returned station logos use the same HA-local artwork proxy as MA artwork, avoiding lost images in the required-Engine card. Public directory entries with missing logos remain without a fabricated image; metadata quality varies by station.
 
 ## One experience, two repositories
 
@@ -230,7 +241,7 @@ The card/Engine WebSocket interface includes context, players, playback, queue, 
 | Card says Engine required | Engine entry loaded, card resource version, HA authenticated connection; do not restore a frontend token workaround |
 | No players or wrong player | Native MA availability, official HA exposure, configured entity/profile and pinned/excluded filters |
 | Queue missing or slow | MA active queue ownership, Engine diagnostics and provider response; distinguish unavailable from empty |
-| Group dissolves | Compare the same grouping directly in MA and capture timestamps/model/protocol; this is a known beta investigation area |
+| Group dissolves | Compare directly in MA. On generic Up2Stream/Rakoit LinkPlay with MA 2.11.0b2, enable the existing DLNA provider and verify both physical devices are discovered: AirPlay may become unavailable in follower mode, causing MA to remove the member. Native grouping remains LinkPlay. Other hardware/versions need separate verification. |
 | No lyrics | Whether MA returns lyrics for that exact item; synchronization/lyrics are not universal |
 | This device fails | MA Sendspin support, secure access where required, a user audio gesture and browser permissions/background restrictions |
 | Timer/rule seems absent | Same profile/instance, HA timezone, enabled status and HA uptime |
@@ -264,3 +275,19 @@ The preceding 0.7.21 source passed 52 regression tests and repository validation
 HOMEii Flow uses the same gold wave mark in both projects. Root `icon.png`/`logo.png`, integration assets and screensaver assets retain their natural aspect ratio. README images link to local repository assets, so they do not depend on an unpublished tag. HA's integration-brand catalog is a separate publication process; placing icons in this repository alone does not guarantee every HA/HACS surface displays them.
 
 Built for Home Assistant and Music Assistant, with community feedback shaping the beta. See the [card repository](https://github.com/r11a/homeii-music-flow) for interface credits and community translations, including the German contribution by rtreichl.
+
+
+### Shared night display preferences
+
+The card's Smart screen can save night display mode, start/end times and active days in the Engine per profile. Other cards using the same profile receive these preferences in Engine context on refresh/startup. Display night mode does not lower speaker volume; use volume policies for that purpose.
+
+Use the Home Assistant action `homeii_flow.set_interface_preferences` with `profile_id`, `night_mode` (`off`, `on`, `auto`), `night_start` and `night_end` in `HH:MM`, and `night_days` (0 Sunday through 6 Saturday). The card uses `homeii_flow/interface/get` and `homeii_flow/interface/set`; all paths share the same persisted store and validation. Existing card-local night settings remain the fallback until the profile has stored values.
+
+The Smart screen also edits the existing system screensaver and artwork-lighting configuration. System screensaver display still requires the separate frontend resource described above. Artwork-lighting status reports `updated_at`, `media_title`, `rgb` and failures, enabling verification of actual backend updates while dashboards are closed. A reported update is not an acoustic or visual hardware inspection.
+
+## Guided connection
+
+Choose Automatic to create a dedicated token using your Music Assistant built-in username and password (not your Home Assistant credentials). The password is not stored. Alternatively choose Manual and paste a long-lived token from Music Assistant Settings → Profile. HA ingress URLs are rejected with guidance to use the direct MA server address. Keep Instance ID and Default Profile ID as default for a standard single installation.
+
+[Beginner installation and rollback guide](https://github.com/r11a/homeii-music-flow/blob/v6.0.0-beta.1/docs/INSTALL_STEP_BY_STEP.md).
+

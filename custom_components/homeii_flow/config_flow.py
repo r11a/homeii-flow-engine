@@ -10,6 +10,8 @@ from aiohttp import ClientError, ClientTimeout
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import selector
+from .onboarding_auth import create_onboarding_token, is_ha_interface_url
 
 from .const import (
     CONF_ENABLE_EXPERIMENTAL,
@@ -96,8 +98,13 @@ async def _validate_music_assistant_api(hass: Any, url: str, token: str) -> str 
             if response.status >= 400:
                 return "cannot_connect"
             payload = await response.json(content_type=None)
-        if not isinstance(payload, dict) or payload.get("error_code") or payload.get("error"):
-            return "invalid_auth" if "auth" in str(payload).lower() else "invalid_response"
+        # HTTP returns the command result directly; WebSocket wraps it in result.
+        if isinstance(payload, dict):
+            if payload.get("error_code") or payload.get("error"):
+                return "invalid_auth" if "auth" in str(payload).lower() else "invalid_response"
+            payload = payload.get("result")
+        if not isinstance(payload, list) or any(not isinstance(player, dict) for player in payload):
+            return "invalid_response"
     except (ClientError, TimeoutError, ValueError, TypeError):
         return "cannot_connect"
     return None
@@ -204,7 +211,44 @@ class HomeiiFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(
+    async def async_step_user(self, user_input=None):
+        """Choose explicit MA login or manual token setup."""
+        return self.async_show_menu(step_id="user", menu_options=["automatic", "manual"])
+
+    async def async_step_automatic(self, user_input=None):
+        """Create a dedicated token using MA built-in credentials."""
+        errors = {}
+        if user_input is not None:
+            # Reject duplicate instances before creating a token on MA.
+            instance_id = str(user_input.get(CONF_INSTANCE_ID) or DEFAULT_INSTANCE_ID).strip()
+            await self.async_set_unique_id(instance_id)
+            self._abort_if_unique_id_configured()
+            try:
+                token = await create_onboarding_token(
+                    async_get_clientsession(self.hass),
+                    str(user_input.get(CONF_MUSIC_ASSISTANT_URL) or ""),
+                    str(user_input.get("username") or ""),
+                    str(user_input.get("password") or ""),
+                )
+            except ValueError as err:
+                errors["base"] = str(err) if str(err) in {"invalid_url", "unsupported_ma_version", "ma_ingress_url"} else "automatic_login_failed"
+            except (ClientError, TimeoutError):
+                errors["base"] = "cannot_connect"
+            else:
+                # Only the dedicated token goes into the regular setup flow.
+                return await self.async_step_manual({
+                    CONF_INSTANCE_ID: instance_id,
+                    CONF_MUSIC_ASSISTANT_URL: user_input[CONF_MUSIC_ASSISTANT_URL],
+                    CONF_MUSIC_ASSISTANT_TOKEN: token,
+                })
+        return self.async_show_form(step_id="automatic", data_schema=vol.Schema({
+            vol.Required(CONF_MUSIC_ASSISTANT_URL): str,
+            vol.Required("username"): str,
+            vol.Required("password"): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
+            vol.Optional(CONF_INSTANCE_ID, default=DEFAULT_INSTANCE_ID): str,
+        }), errors=errors)
+
+    async def async_step_manual(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
@@ -223,6 +267,8 @@ class HomeiiFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ).strip()
             if not instance_id:
                 errors[CONF_INSTANCE_ID] = "required"
+            if is_ha_interface_url(music_assistant_url):
+                errors[CONF_MUSIC_ASSISTANT_URL] = "ma_ingress_url"
             if music_assistant_url and not music_assistant_url.startswith(
                 ("http://", "https://")
             ):
@@ -258,7 +304,7 @@ class HomeiiFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         return self.async_show_form(
-            step_id="user",
+            step_id="manual",
             data_schema=vol.Schema(
                 {
                     vol.Optional("name", default=DEFAULT_NAME): str,
@@ -267,7 +313,6 @@ class HomeiiFlowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_MUSIC_ASSISTANT_URL, default=""): str,
                     vol.Optional(CONF_MUSIC_ASSISTANT_EXTERNAL_URL, default=""): str,
                     vol.Required(CONF_MUSIC_ASSISTANT_TOKEN, default=""): str,
-                    vol.Optional(CONF_ENABLE_EXPERIMENTAL, default=False): bool,
                 }
             ),
             errors=errors,
@@ -342,6 +387,8 @@ class HomeiiFlowOptionsFlow(config_entries.OptionsFlow):
                 or ""
             ).strip()
             effective_token = entered_token or existing_token
+            if is_ha_interface_url(music_assistant_url):
+                errors[CONF_MUSIC_ASSISTANT_URL] = "ma_ingress_url"
             if music_assistant_url and not music_assistant_url.startswith(
                 ("http://", "https://")
             ):
@@ -376,10 +423,6 @@ class HomeiiFlowOptionsFlow(config_entries.OptionsFlow):
                             self._config_entry.data.get(CONF_PROFILE_ID, DEFAULT_PROFILE_ID),
                         ),
                     ): str,
-                    vol.Optional(
-                        CONF_ENABLE_EXPERIMENTAL,
-                        default=self._config_entry.options.get(CONF_ENABLE_EXPERIMENTAL, False),
-                    ): bool,
                     vol.Required(
                         CONF_MUSIC_ASSISTANT_URL,
                         default=self._config_entry.options.get(

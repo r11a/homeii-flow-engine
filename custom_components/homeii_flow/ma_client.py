@@ -141,6 +141,7 @@ class MusicAssistantEventClient:
         timeout: float = 30,
     ) -> Any:
         """Execute a command on the authenticated persistent MA connection."""
+        deadline = asyncio.get_running_loop().time() + timeout
         if not self._authenticated:
             try:
                 await asyncio.wait_for(self._ready_event.wait(), timeout=min(timeout, 12))
@@ -154,22 +155,30 @@ class MusicAssistantEventClient:
         self._pending_commands[message_id] = future
         self._partial_results[message_id] = []
         try:
-            async with self._send_lock:
-                if self._ws is not ws or ws.closed or not self._authenticated:
-                    raise RuntimeError("Music Assistant WebSocket connection changed")
-                await ws.send_json(
-                    {
-                        "message_id": message_id,
-                        "command": str(command or "").strip(),
-                        "args": args or {},
-                    }
-                )
-            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+            # One deadline includes lock contention, sending and the MA response.
+            async with asyncio.timeout_at(deadline):
+                async with self._send_lock:
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise TimeoutError
+                    if self._ws is not ws or ws.closed or not self._authenticated:
+                        raise RuntimeError("Music Assistant WebSocket connection changed")
+                    await ws.send_json(
+                        {
+                            "message_id": message_id,
+                            "command": str(command or "").strip(),
+                            "args": args or {},
+                        }
+                    )
+                return await asyncio.shield(future)
         except TimeoutError as err:
             raise RuntimeError(f"Music Assistant command timed out: {command}") from err
         finally:
             self._pending_commands.pop(message_id, None)
             self._partial_results.pop(message_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()  # Consume a disconnect error even if sending failed first.
 
     def snapshot(self) -> dict[str, Any]:
         """Return status without exposing URL credentials."""

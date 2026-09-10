@@ -1,6 +1,6 @@
 # HOMEii Flow Engine 1.0.0 Beta 1
 
-**Draft release notes. No release or tag is published by this preparation.**
+**Public beta — install deliberately and back up first.**
 
 Matching card: **[HOMEii Music Flow 6.0.0-beta.1](https://github.com/r11a/homeii-music-flow)**. Install and configure the Engine before upgrading card 5.9.3. Read the [full setup guide](README.md) and [Hebrew migration warning](docs/BETA_UPGRADE_HE.md).
 
@@ -22,6 +22,11 @@ Long-running grouping, specific DLNA hardware, mobile background audio, audible 
 
 ## Publication policy
 
-Repository remains private until the owner explicitly decides otherwise. Public access or public packaging is a publication prerequisite. Planned releases must be Pre-release and not Latest. Users enabling beta updates or custom update automations control their own update policy; manual version selection is recommended for testing.
+Published as a public Pre-release, not Latest. Users enabling beta updates or custom update automations control their own update policy; manual version selection is recommended for testing.
 
 Report both component versions, HA/MA version/schema, player model/protocol, reproduction and redacted diagnostics in the [Engine tracker](https://github.com/r11a/homeii-flow-engine/issues). Never share tokens or full backups.
+
+## Onboarding
+
+Two connection routes: automatic dedicated-token creation with MA built-in credentials, or manual long-lived token entry. Clear explanations for instance/profile identifiers and validation for Home Assistant ingress URLs. Automatic login is covered by protocol tests; broader real-installation testing remains part of this beta.
+

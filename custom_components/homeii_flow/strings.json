@@ -2,22 +2,45 @@
   "title": "HOMEii Flow Engine",
   "config": {
     "step": {
-      "user": {
-        "title": "Set up HOMEii Flow Engine",
-        "description": "Create the required HOMEii Flow 6 backend integration. HOMEii Music Flow 6 uses this Engine for playback, queue, library, artwork, schedules, statistics and diagnostics.",
+      "manual": {
+        "title": "Connect with an MA API token",
+        "description": "Connect HOMEii Music Flow 6 to Music Assistant.\n\n1. Open Music Assistant → Settings → Profile → Long-lived access tokens. Create a token named HOMEii Flow Engine and copy it. This must be a Music Assistant token, not a Home Assistant token or Spotify API key.\n2. Enter the direct MA server URL below (usually port 8095), not your HA dashboard or ingress URL.\n3. Paste the token and submit. The connection is checked before saving.\n4. Once the Engine is loaded, add or upgrade the HOMEii Music Flow card.\n\n[Open the illustrated MA token guide](https://www.music-assistant.io/settings/profile/). The guide is documentation; open your own MA installation to create the token.\n\nFor a normal installation, leave both identifiers as default.",
         "data": {
           "name": "Name",
           "instance_id": "Instance ID",
           "profile_id": "Default profile ID",
           "music_assistant_url": "Music Assistant server URL",
           "music_assistant_external_url": "Music Assistant external HTTPS URL",
-          "music_assistant_token": "Music Assistant API token",
-          "enable_experimental": "Enable experimental features"
+          "music_assistant_token": "Music Assistant API token"
         },
         "data_description": {
-          "music_assistant_url": "Required Music Assistant 2.10 server URL. Example: http://192.168.1.10:8095.",
+          "music_assistant_url": "Direct Music Assistant server address reachable from Home Assistant, usually port 8095. Example: http://192.168.1.100:8095. Do not enter your HA dashboard URL.",
           "music_assistant_external_url": "Optional HTTPS Web Server/API URL used for artwork when the internal address is unavailable. Do not use the Home Assistant ingress page.",
-          "music_assistant_token": "Stored only in the Home Assistant config entry and never sent to the browser."
+          "music_assistant_token": "MA → Settings → Profile → Long-lived access tokens → create a token named HOMEii Flow Engine. Paste it here. Keep it private; it is stored in HA and not included in card YAML.",
+          "instance_id": "Identifies this Engine connection inside Home Assistant. Leave default for one Engine. Use a unique ID only when deliberately creating a separate Engine instance; cards can select that same ID. This is not a speaker name or an MA user ID.",
+          "profile_id": "Default namespace for Engine policies and stored schedules. Leave default for normal use. It is not your Music Assistant login/profile. Cards using a custom Engine profile must use the matching profile ID."
+        }
+      },
+      "user": {
+        "title": "Connect Music Assistant",
+        "description": "Choose how to connect. Automatic setup creates a dedicated MA token; manual setup uses a token you create in MA.",
+        "menu_options": {
+          "automatic": "Sign in with a Music Assistant username and password",
+          "manual": "Paste a Music Assistant API token"
+        }
+      },
+      "automatic": {
+        "title": "Sign in to Music Assistant",
+        "description": "Use a local Music Assistant username and password, not your Home Assistant login. Submitting creates a dedicated token named HOMEii Flow Engine. Your password is used only for this request and is not saved. If you only sign in through Home Assistant, go back and choose manual token setup.",
+        "data": {
+          "music_assistant_url": "Music Assistant server URL",
+          "username": "Music Assistant username",
+          "password": "Music Assistant password",
+          "instance_id": "Instance ID"
+        },
+        "data_description": {
+          "music_assistant_url": "Direct Music Assistant server address reachable from Home Assistant, usually port 8095. Example: http://192.168.1.100:8095. Do not enter your HA dashboard URL.",
+          "instance_id": "Identifies this Engine connection inside Home Assistant. Leave default for one Engine. Use a unique ID only when deliberately creating a separate Engine instance; cards can select that same ID. This is not a speaker name or an MA user ID."
         }
       }
     },
@@ -28,12 +51,14 @@
       "invalid_auth": "Music Assistant rejected the API token.",
       "cannot_connect": "Could not connect to the Music Assistant API.",
       "invalid_response": "Music Assistant returned an invalid API response.",
-      "unsupported_ma_version": "Music Assistant 2.10 or newer is required.",
+      "unsupported_ma_version": "Music Assistant API schema 63 or newer is required. Update MA, then retry.",
       "runtime_unavailable": "HOMEii Flow Engine runtime is not loaded yet.",
       "no_music_assistant_players": "No Music Assistant players were detected.",
       "no_volume_rules": "No volume rules are configured.",
       "no_schedules": "No schedules are configured.",
-      "invalid_days": "Days must be comma separated numbers from 0 to 6, where Sunday is 0."
+      "invalid_days": "Days must be comma separated numbers from 0 to 6, where Sunday is 0.",
+      "automatic_login_failed": "MA sign-in or token creation failed. Check your local MA credentials, or go back and use manual token setup.",
+      "ma_ingress_url": "This is a Home Assistant dashboard/Ingress address, not the Music Assistant API. Enter the direct MA server address, usually http://YOUR-MA-IP:8095. Opening MA from the HA sidebar does not give you its API address."
     },
     "abort": {
       "already_configured": "This HOMEii Flow Engine instance is already configured"
@@ -56,12 +81,12 @@
           "profile_id": "Default profile ID",
           "music_assistant_url": "Music Assistant server URL",
           "music_assistant_external_url": "Music Assistant external HTTPS URL",
-          "music_assistant_token": "Replace Music Assistant API token",
-          "enable_experimental": "Enable experimental features"
+          "music_assistant_token": "Replace Music Assistant API token"
         },
         "data_description": {
           "music_assistant_external_url": "Optional HTTPS fallback. Do not use the Home Assistant ingress page.",
-          "music_assistant_token": "Leave blank to keep the currently stored token."
+          "music_assistant_token": "Leave blank to keep the currently stored token.",
+          "profile_id": "Default namespace for Engine policies and stored schedules. Leave default for normal use. It is not your Music Assistant login/profile. Cards using a custom Engine profile must use the matching profile ID."
         }
       },
       "add_volume_rule": {
@@ -132,7 +157,8 @@
       "no_volume_rules": "No volume rules are configured.",
       "no_schedules": "No schedules are configured.",
       "schedule_run_failed": "The selected schedule was found but playback failed. Check the integration diagnostics for the last schedule action.",
-      "invalid_days": "Days must be comma separated numbers from 0 to 6, where Sunday is 0."
+      "invalid_days": "Days must be comma separated numbers from 0 to 6, where Sunday is 0.",
+      "ma_ingress_url": "This is a Home Assistant dashboard/Ingress address, not the Music Assistant API. Enter the direct MA server address, usually http://YOUR-MA-IP:8095. Opening MA from the HA sidebar does not give you its API address."
     }
   }
 }

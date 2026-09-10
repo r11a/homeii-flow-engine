@@ -32,6 +32,11 @@ EVENT_MUSIC_ASSISTANT = f"{DOMAIN}_music_assistant_event"
 SIGNAL_ENGINE_UPDATED = f"{DOMAIN}_updated"
 
 CAPABILITIES = {
+    "artwork_lighting": True,
+    "interface_preferences": True,
+    "wheel_preferences": True,
+    "saved_playlists": True,
+    "radio_directory": True,
     "context": True,
     "bootstrap_snapshot": True,
     "persistent_media_cache": True,

@@ -12,6 +12,9 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import CONF_INSTANCE_ID, CONF_PROFILE_ID, DOMAIN
 from .runtime import HomeiiFlowRuntime
+from .radio_directory import search_stations
+from .saved_playlists import list_playlists, save_playlist, play_playlist, delete_playlist
+from .interface_preferences import read_preferences, save_preferences, read_wheel_preferences, save_wheel_preferences
 
 
 def _runtime(hass: HomeAssistant) -> HomeiiFlowRuntime:
@@ -39,6 +42,14 @@ BASE_SCHEMA = {
 
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register HOMEii Flow Engine websocket commands."""
+    websocket_api.async_register_command(hass, websocket_saved_playlists)
+    websocket_api.async_register_command(hass, websocket_get_wheel_preferences)
+    websocket_api.async_register_command(hass, websocket_set_wheel_preferences)
+    websocket_api.async_register_command(hass, websocket_get_interface_preferences)
+    websocket_api.async_register_command(hass, websocket_set_interface_preferences)
+    websocket_api.async_register_command(hass, websocket_get_artwork_lighting)
+    websocket_api.async_register_command(hass, websocket_set_artwork_lighting)
+    websocket_api.async_register_command(hass, websocket_radio_search)
     websocket_api.async_register_command(hass, websocket_get_context)
     websocket_api.async_register_command(hass, websocket_get_bootstrap)
     websocket_api.async_register_command(hass, websocket_get_required_connections)
@@ -879,3 +890,89 @@ async def websocket_queue_settings(hass, connection, msg):
         connection.send_result(msg["id"], result)
     except Exception as err:  # noqa: BLE001 - explicit command failure
         connection.send_error(msg["id"], "queue_settings_failed", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/lighting/get", **BASE_SCHEMA})
+@callback
+def websocket_get_artwork_lighting(hass, connection, msg):
+    """Return persistent player/light assignments and their current status."""
+    connection.send_result(msg["id"], _runtime(hass).artwork_lighting.snapshot())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "homeii_flow/lighting/set", **BASE_SCHEMA,
+    vol.Required("player"): str, vol.Optional("lights"): [str],
+    vol.Optional("enabled"): bool, vol.Optional("brightness"): vol.Coerce(float),
+    vol.Optional("transition"): vol.Coerce(float), vol.Optional("cooldown"): vol.Coerce(float),
+})
+@websocket_api.async_response
+async def websocket_set_artwork_lighting(hass, connection, msg):
+    """Persist and apply a player's artwork lighting configuration."""
+    try:
+        connection.send_result(msg["id"], await _runtime(hass).artwork_lighting.configure(_command_payload(msg)))
+    except Exception as err:
+        connection.send_error(msg["id"], "lighting_failed", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/radio/search", **BASE_SCHEMA,
+    vol.Optional("query",default=""): str, vol.Optional("country",default=""): str,
+    vol.Optional("tag",default=""): str, vol.Optional("limit",default=40): vol.All(vol.Coerce(int),vol.Range(min=8,max=80))})
+@websocket_api.async_response
+async def websocket_radio_search(hass, connection, msg):
+    """Search the public station directory, preserving artwork through the Engine."""
+    try:
+        connection.send_result(msg["id"], await search_stations(_runtime(hass), _command_payload(msg)))
+    except Exception as err:
+        connection.send_error(msg["id"], "radio_search_failed", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/interface/get", **BASE_SCHEMA})
+@callback
+def websocket_get_interface_preferences(hass, connection, msg):
+    connection.send_result(msg["id"], read_preferences(_runtime(hass), msg.get("profile_id")))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/interface/set", **BASE_SCHEMA,
+    vol.Optional("night_mode"): str, vol.Optional("night_start"): str,
+    vol.Optional("night_end"): str, vol.Optional("night_days"): [int]})
+@websocket_api.async_response
+async def websocket_set_interface_preferences(hass, connection, msg):
+    try:
+        connection.send_result(msg["id"], await save_preferences(_runtime(hass), _command_payload(msg)))
+    except Exception as err:
+        connection.send_error(msg["id"], "interface_set_failed", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/wheels/get", **BASE_SCHEMA})
+@callback
+def websocket_get_wheel_preferences(hass, connection, msg):
+    connection.send_result(msg["id"], read_wheel_preferences(_runtime(hass), msg.get("profile_id"), connection.user.id))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/wheels/set", **BASE_SCHEMA,
+    vol.Required("scope"): vol.In(["user", "global"]), vol.Required("context"): str,
+    vol.Required("preference"): dict})
+@websocket_api.async_response
+async def websocket_set_wheel_preferences(hass, connection, msg):
+    try:
+        result = await save_wheel_preferences(_runtime(hass), _command_payload(msg), connection.user.id, connection.user.is_admin)
+        connection.send_result(msg["id"], result)
+    except Exception as err:
+        connection.send_error(msg["id"], "wheel_save_failed", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/playlists", **BASE_SCHEMA,
+    vol.Optional("action", default="list"): vol.In(["list", "save", "play", "delete"]),
+    vol.Optional("name"): str, vol.Optional("uris"): [str], vol.Optional("playlist_id"): str})
+@websocket_api.async_response
+async def websocket_saved_playlists(hass, connection, msg):
+    try:
+        runtime = _runtime(hass)
+        payload = _command_payload(msg)
+        if msg["action"] == "save": result = await save_playlist(runtime, payload)
+        elif msg["action"] == "play": result = await play_playlist(runtime, payload)
+        elif msg["action"] == "delete": result = await delete_playlist(runtime, payload)
+        else: result = list_playlists(runtime, msg.get("profile_id") or "default")
+        connection.send_result(msg["id"], result)
+    except Exception as err:
+        connection.send_error(msg["id"], "saved_playlist_failed", str(err))

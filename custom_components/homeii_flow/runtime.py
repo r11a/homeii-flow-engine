@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from .artwork_lighting import ArtworkLighting
 from .queue_settings import async_queue_settings
+from .player_timing import playback_position_pair
 from .queue_controls import build_queue_switch, build_playback_speed
 
 import asyncio
@@ -960,6 +962,7 @@ class HomeiiFlowRuntime:
             "playback_stats": {},
             "screensaver": {},
         }
+        self.artwork_lighting = ArtworkLighting(self)
         self._stats_cache: dict[str, Any] | None = None
         self._stats_cache_at = 0.0
         self._orchestration_unsub: Callable[[], None] | None = None
@@ -1247,6 +1250,10 @@ class HomeiiFlowRuntime:
                 or image_type in {"thumb", "thumbnail", "fanart", "logo", "banner", "landscape", "clearart"}
             )
         )
+        # Public station logos can be fetched directly when MA's proxy index is stale.
+        direct_path = value.get("path")
+        if path_is_image and value.get("remotely_accessible") and isinstance(direct_path, str) and direct_path.startswith(("https://", "http://")):
+            _append_unique(candidates, direct_path)
         proxy_value = _dict_first(value, "proxy_id", "image_proxy_id", "media_image_proxy_id")
         if not proxy_value and path_is_image:
             proxy_value = value.get("path")
@@ -1272,6 +1279,7 @@ class HomeiiFlowRuntime:
             "fanart",
             "logo",
             "icon",
+            "favicon",
         )
         for key in artwork_keys:
             candidate = value.get(key)
@@ -1752,32 +1760,28 @@ class HomeiiFlowRuntime:
         self._media_cache_warm_unsub = async_call_later(self.hass, 3, warm_later)
 
     async def _async_warm_media_cache(self) -> None:
-        """Populate common library views sequentially with bounded load."""
+        """Prepare first pages with bounded concurrency, independent of slow shelves."""
         started = time.perf_counter()
         warmed = 0
         self._media_cache_metrics["warm_status"] = "running"
-        for media_type, limit in (
-            ("playlist", 500),
-            ("album", 250),
-            ("artist", 250),
-            ("radio", 250),
-            ("track", 350),
-            ("podcast", 250),
-        ):
-            try:
-                await self.async_get_library(
-                    {
-                        "media_type": media_type,
-                        "order_by": "sort_name",
-                        "limit": limit,
-                    }
-                )
-                warmed += 1
-            except Exception:  # noqa: BLE001 - warm-up is best effort
-                self._media_cache_metrics["warm_failures"] = int(
-                    self._media_cache_metrics.get("warm_failures") or 0
-                ) + 1
-            await asyncio.sleep(0)
+        semaphore = asyncio.Semaphore(2)
+
+        async def warm_shelf(media_type: str) -> None:
+            nonlocal warmed
+            async with semaphore:
+                try:
+                    await self.async_get_library(
+                        {"media_type": media_type, "order_by": "sort_name", "limit": 60, "compact": True}
+                    )
+                    warmed += 1
+                except Exception:  # noqa: BLE001 - warm-up is best effort
+                    self._media_cache_metrics["warm_failures"] = int(
+                        self._media_cache_metrics.get("warm_failures") or 0
+                    ) + 1
+
+        await asyncio.gather(*(warm_shelf(kind) for kind in (
+            "playlist", "artist", "album", "radio", "track", "podcast"
+        )))
         self._media_cache_metrics["warm_status"] = "ready" if warmed else "degraded"
         self._media_cache_metrics["warm_shelves"] = warmed
         self._media_cache_metrics["last_warm_ms"] = round((time.perf_counter() - started) * 1000, 2)
@@ -1795,10 +1799,15 @@ class HomeiiFlowRuntime:
                     "announcements": _safe_list(stored.get("announcements")),
                     "activity": _safe_list(stored.get("activity")),
                     "playback_stats": stored.get("playback_stats") if isinstance(stored.get("playback_stats"), dict) else {},
+                    "interface_preferences": stored.get("interface_preferences") if isinstance(stored.get("interface_preferences"), dict) else {},
+                    "wheel_preferences": stored.get("wheel_preferences") if isinstance(stored.get("wheel_preferences"), dict) else {},
+                    "saved_playlists": stored.get("saved_playlists") if isinstance(stored.get("saved_playlists"), dict) else {},
                     "screensaver": stored.get("screensaver") if isinstance(stored.get("screensaver"), dict) else {},
+                    "artwork_lighting": stored.get("artwork_lighting") if isinstance(stored.get("artwork_lighting"), dict) else {},
                 }
             )
         await self._async_load_media_cache()
+        self.artwork_lighting.start()
 
     def async_start_orchestration(self) -> None:
         """Start lightweight schedule and policy enforcement."""
@@ -2098,6 +2107,7 @@ class HomeiiFlowRuntime:
             "engine_version": VERSION,
             "instance_id": resolved_instance,
             "profile_id": resolved_profile,
+            "interface_preferences": copy.deepcopy(self._storage.get("interface_preferences", {}).get(resolved_profile, {})),
             "capabilities": CAPABILITIES,
             "frontend": {
                 "system_screensaver_url": "/homeii_flow/homeii-flow-system-screensaver.js",
@@ -2706,20 +2716,7 @@ class HomeiiFlowRuntime:
         active_queue = _clean_string(_dict_first(raw, "active_queue", "queue_id"))
         artwork_url = _clean_string(media.get("homeii_artwork_url"))
         friendly_name = _clean_string(_dict_first(raw, "name", "display_name") or entity_id or player_id)
-        elapsed_updated = _maybe_number(
-            _dict_first(raw, "elapsed_time_last_updated", "media_position_updated_at")
-            or _dict_first(
-                current_media,
-                "elapsed_time_last_updated",
-                "media_position_updated_at",
-            )
-        )
-        if elapsed_updated is not None:
-            elapsed_updated_at: str | None = datetime.fromtimestamp(
-                elapsed_updated, tz=UTC
-            ).isoformat()
-        else:
-            elapsed_updated_at = _clean_string(raw.get("media_position_updated_at")) or None
+        elapsed_position, elapsed_updated_at = playback_position_pair(raw)
         attributes = {
             "friendly_name": friendly_name,
             "registry_platform": "music_assistant",
@@ -2742,8 +2739,7 @@ class HomeiiFlowRuntime:
             "media_artist": media.get("artist"),
             "media_album_name": media.get("album_name"),
             "media_duration": media.get("duration"),
-            "media_position": _dict_first(raw, "elapsed_time", "media_position")
-            or _dict_first(current_media, "elapsed_time", "media_position"),
+            "media_position": elapsed_position,
             "media_position_updated_at": elapsed_updated_at,
             "entity_picture": artwork_url,
             "media_image_url": artwork_url,

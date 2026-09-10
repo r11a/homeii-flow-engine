@@ -636,3 +636,27 @@ set_queue_settings:
           max: 15
           step: 1
           unit_of_measurement: s
+
+set_interface_preferences:
+  name: Set interface preferences
+  description: Save shared night display preferences for a profile. This controls display appearance, not speaker volume.
+  fields:
+    profile_id:
+      selector:
+        text:
+    night_mode:
+      selector:
+        select:
+          options: ["off", "on", "auto"]
+    night_start:
+      description: Start time in HH:MM format.
+      selector:
+        text:
+    night_end:
+      description: End time in HH:MM format.
+      selector:
+        text:
+    night_days:
+      description: Days from 0 (Sunday) to 6 (Saturday).
+      selector:
+        object:

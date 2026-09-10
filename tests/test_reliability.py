@@ -34,6 +34,7 @@ registry = SimpleNamespace(entities={}, async_get=lambda _: None)
 namespace = {"time": time, "DEFAULT_PROFILE_ID": "default", "asyncio": asyncio, "copy": copy, "Any": Any, "datetime": datetime, "UTC": UTC,
              "HomeiiFlowServiceUnavailable": RuntimeError, "er": SimpleNamespace(async_get=lambda _: registry)}
 exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(SOURCE), "exec"), namespace)
+exec((ROOT / "custom_components/homeii_flow/player_timing.py").read_text(encoding="utf-8"), namespace)
 Runtime = namespace["HomeiiFlowRuntime"]
 
 

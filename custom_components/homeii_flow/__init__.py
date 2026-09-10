@@ -37,6 +37,7 @@ from .const import (
 from .queue_settings import FIELD_TYPES
 from .runtime import HomeiiFlowRuntime
 from .websocket_api import async_register_websocket_commands
+from .interface_preferences import save_preferences
 
 _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -614,6 +615,14 @@ async def async_prepare_runtime(hass: HomeAssistant) -> HomeiiFlowRuntime:
 
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register optional automation-facing services."""
+    async def set_interface_preferences(call: ServiceCall) -> None:
+        await save_preferences(hass.data[DOMAIN]["runtime"], dict(call.data))
+
+    if not hass.services.has_service(DOMAIN, "set_interface_preferences"):
+        hass.services.async_register(DOMAIN, "set_interface_preferences", set_interface_preferences,
+            schema=vol.Schema({vol.Optional("profile_id"): str, vol.Optional("night_mode"): str,
+                vol.Optional("night_start"): str, vol.Optional("night_end"): str, vol.Optional("night_days"): [int]}))
+
 
     async def set_volume_rule(call: ServiceCall) -> None:
         runtime = async_get_runtime(hass)
