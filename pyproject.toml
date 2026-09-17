@@ -1,6 +1,6 @@
 [project]
 name = "homeii-flow-engine"
-version = "1.0.0"
+version = "1.0.1"
 description = "Required Home Assistant backend engine for HOMEii Music Flow 6."
 readme = "README.md"
 requires-python = ">=3.12"

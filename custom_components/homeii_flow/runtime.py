@@ -1890,7 +1890,6 @@ class HomeiiFlowRuntime:
             "scheduled_jobs": len(self._schedule_unsubs),
         }
         await self.async_update_playback_statistics(local_now)
-        async_dispatcher_send(self.hass, SIGNAL_ENGINE_UPDATED)
         schedule_results = await self.async_run_due_schedules(local_now)
         timer_results = await self.async_run_due_timers(local_now)
         volume_results = await self.async_enforce_volume_rules(local_now)
@@ -2119,7 +2118,6 @@ class HomeiiFlowRuntime:
             "required_connections": required_connections or self.required_connections_snapshot(),
             "music_assistant": self._music_assistant_client.snapshot(),
             "media_cache": self.library_cache_status(),
-            "generated_at": _utc_iso(),
         }
 
     async def async_bootstrap_snapshot(
@@ -2318,7 +2316,6 @@ class HomeiiFlowRuntime:
         return {
             "status": status,
             "ok": required_ok,
-            "generated_at": _utc_iso(),
             "summary": "Required connections are ready." if required_ok else "One or more required connections need attention.",
             "connections": connections,
             "music_assistant": connections["music_assistant"],
@@ -3092,12 +3089,6 @@ class HomeiiFlowRuntime:
     def playback_statistics(self, now: datetime | None = None) -> dict[str, Any]:
         """Return passive playback statistics for dashboards and diagnostics."""
         local_now = _local_datetime(now)
-        if not self._playback_stats_is_syncing:
-            self._playback_stats_is_syncing = True
-            try:
-                self._sync_playback_statistics(local_now)
-            finally:
-                self._playback_stats_is_syncing = False
         day_key = local_now.date().isoformat()
         stats = self._playback_stats_storage()
         day = self._playback_stats_day(day_key)
@@ -3117,7 +3108,6 @@ class HomeiiFlowRuntime:
         active_entities = _safe_list(stats.get("active_entities"))
         recommendation = self.screensaver_recommendation(now)
         return {
-            "generated_at": _utc_iso(),
             "day": day_key,
             "today_seconds": round(float(day.get("total_seconds") or 0), 1),
             "today_minutes": round(float(day.get("total_seconds") or 0) / 60, 1),
@@ -3142,7 +3132,6 @@ class HomeiiFlowRuntime:
             "active_player": active_player,
             "active_player_entity": active_player.get("entity_id") if active_player else "",
             "playing_entities": playing_entities,
-            "generated_at": _utc_iso(),
         }
 
     def screensaver_config(self, profile_id: str | None = None) -> dict[str, Any]:
@@ -4718,11 +4707,15 @@ class HomeiiFlowRuntime:
                 if self._media_command_inflight.get(cache_key) is task:
                     self._media_command_inflight.pop(cache_key, None)
         realtime = self._music_assistant_client.snapshot()
-        if not realtime.get("authenticated") or not realtime.get("schema_supported"):
+        if not realtime.get("configured"):
             raise HomeiiFlowServiceUnavailable(
-                "The authenticated Music Assistant WebSocket command channel is not ready."
+                "The Music Assistant WebSocket command channel is not configured."
             )
         try:
+            # The persistent client owns its readiness wait. Entry setup starts
+            # the connection and the health probe in the same event-loop turn,
+            # so rejecting an unauthenticated snapshot here creates a false
+            # startup failure on otherwise healthy, slower MA installations.
             result = await self._music_assistant_client.async_command(
                 command,
                 args,

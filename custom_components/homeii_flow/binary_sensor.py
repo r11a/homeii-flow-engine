@@ -43,7 +43,28 @@ def _connection_attrs(runtime: HomeiiFlowRuntime, key: str) -> dict[str, Any]:
     """Return one required-connection attributes mapping."""
     snapshot = runtime.required_connections_snapshot()
     value = snapshot.get(key)
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    allowed = (
+        "ok", "status", "message", "loaded_entry_count", "service_count",
+        "music_assistant_player_count", "all_media_player_count", "url_count",
+        "token_configured", "configured", "connected", "authenticated",
+        "schema_version", "schema_supported", "server_version", "last_error",
+    )
+    return {name: value.get(name) for name in allowed if value.get(name) not in (None, "", [], {})}
+
+
+def _required_connection_attrs(runtime: HomeiiFlowRuntime) -> dict[str, Any]:
+    """Return a recorder-safe connection summary."""
+    snapshot = runtime.required_connections_snapshot()
+    return {
+        "ok": bool(snapshot.get("ok")),
+        "summary": snapshot.get("summary") or "",
+        "music_assistant": (snapshot.get("music_assistant") or {}).get("status") or "unknown",
+        "queue": (snapshot.get("queue_provider") or {}).get("status") or "unknown",
+        "library": (snapshot.get("library_provider") or {}).get("status") or "unknown",
+        "search": (snapshot.get("search_provider") or {}).get("status") or "unknown",
+    }
 
 
 BINARY_SENSORS: tuple[HomeiiFlowBinarySensorDescription, ...] = (
@@ -54,7 +75,7 @@ BINARY_SENSORS: tuple[HomeiiFlowBinarySensorDescription, ...] = (
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
         is_on_fn=lambda runtime, entry: bool(runtime.required_connections_snapshot().get("ok")),
-        attrs_fn=lambda runtime, entry: runtime.required_connections_snapshot(),
+        attrs_fn=lambda runtime, entry: _required_connection_attrs(runtime),
     ),
     HomeiiFlowBinarySensorDescription(
         key="music_assistant_connected",

@@ -22,7 +22,7 @@ if not SOURCE.exists():
     SOURCE = Path(__file__).with_name("runtime.py")
 tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
 helpers = {"_dict_first", "_clean_string", "_safe_list", "_maybe_number", "_first_non_empty", "_safe_id_part", "_utc_iso", "_playback_snapshot_changed"}
-methods = {"_music_assistant_command_allowed", "cached_stats", "stats", "_ha_entity_for_ma_player", "_normalize_ma_player", "_player_readiness", "async_players_snapshot", "async_play_media", "_try_music_queue_command_bridge", "normalize_queue_response", "_queue_payload_root", "_queue_payload_items", "_queue_payload_expected_count", "_resolve_ma_player_id", "is_music_assistant_player"}
+methods = {"_music_assistant_command_allowed", "_music_assistant_command_cacheable", "_music_assistant_command_cache_key", "async_music_assistant_command", "cached_stats", "stats", "_ha_entity_for_ma_player", "_normalize_ma_player", "_player_readiness", "async_players_snapshot", "async_play_media", "_try_music_queue_command_bridge", "normalize_queue_response", "_queue_payload_root", "_queue_payload_items", "_queue_payload_expected_count", "_resolve_ma_player_id", "is_music_assistant_player"}
 methods.update({"_media_type_command_roots", "_music_library_command_attempts", "_try_music_library_command_bridge", "_library_cache_entry", "_library_response", "async_get_library"})
 nodes = [ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)]
 nodes.extend(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in helpers)
@@ -44,6 +44,36 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(Runtime._music_assistant_command_allowed("music/playlists/create_playlist"))
         self.assertFalse(Runtime._music_assistant_command_allowed("music/playlists/remove_playlist_tracks"))
         self.assertFalse(Runtime._music_assistant_command_allowed("config/providers/save"))
+
+    async def test_command_waits_for_configured_websocket_authentication(self):
+        runtime = Runtime()
+        runtime.hass = SimpleNamespace(async_create_task=asyncio.create_task)
+        runtime._music_assistant_client = SimpleNamespace(
+            snapshot=lambda: {"configured": True, "authenticated": False, "schema_supported": False},
+            async_command=AsyncMock(return_value=[{"player_id": "kitchen"}]),
+        )
+        runtime._media_command_cache = {}
+        runtime._media_command_inflight = {}
+        runtime._media_cache_metrics = defaultdict(int)
+        runtime._ma_http_health = {}
+        runtime.decorate_artwork_urls = lambda value: value
+        result = await runtime.async_music_assistant_command({"command": "players/all", "args": {}})
+        self.assertEqual(result["data"], [{"player_id": "kitchen"}])
+        runtime._music_assistant_client.async_command.assert_awaited_once()
+
+    def test_playback_statistics_read_does_not_mutate_storage(self):
+        source_text = SOURCE.read_text(encoding="utf-8")
+        source = source_text.split("    def playback_statistics(", 1)[1].split("\n    def ", 1)[0]
+        self.assertNotIn("_sync_playback_statistics", source)
+        self.assertNotIn("generated_at", source)
+
+    def test_recorder_entities_do_not_force_or_embed_full_diagnostics(self):
+        sensor_source = SOURCE.with_name("sensor.py").read_text(encoding="utf-8")
+        binary_source = SOURCE.with_name("binary_sensor.py").read_text(encoding="utf-8")
+        self.assertNotIn("force_update=True", sensor_source)
+        self.assertNotIn("attrs_fn=lambda runtime, entry: runtime.context(", sensor_source)
+        self.assertIn("_compact_required_connections", sensor_source)
+        self.assertIn("_required_connection_attrs", binary_source)
 
     def setUp(self):
         registry.entities = {}

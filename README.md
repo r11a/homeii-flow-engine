@@ -1,11 +1,11 @@
 <p align="center"><img src="logo.png" alt="HOMEii Flow" width="360"></p>
 <h1 align="center">HOMEii Flow Engine</h1>
 <p align="center"><strong>The connection between your music dashboard and your smart home.</strong><br>Music Assistant state, playback and home automation — through Home Assistant.</p>
-<p align="center"><img alt="Engine 1.0.0" src="https://img.shields.io/badge/Engine-1.0.0-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Stable" src="https://img.shields.io/badge/Status-STABLE-2ea44f"></p>
+<p align="center"><img alt="Engine 1.0.1" src="https://img.shields.io/badge/Engine-1.0.1-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Stable" src="https://img.shields.io/badge/Status-STABLE-2ea44f"></p>
 <p align="center"><a href="https://github.com/r11a/homeii-music-flow">Music Flow card</a> · <a href="#installation">Installation</a> · <a href="#configuration-fields">Configuration</a> · <a href="#automations-you-can-build">Automations</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="docs/BETA_UPGRADE_HE.md">עברית</a></p>
 
 > [!IMPORTANT]
-> **Required stable pair: Engine `1.0.0` + card `6.0.0`. Install the Engine first.** Updating the card from 5.9.3 before the Engine is a breaking, unsupported order.
+> **Required stable pair: Engine `1.0.1` + card `6.0.1`. Install the Engine first.** Updating the card from 5.9.3 before the Engine is a breaking, unsupported order.
 
 > [!WARNING]
 > **Upgrading the card from 5.9.3 requires installing this Engine first.** The 6.0 card is not a standalone replacement JavaScript file. Keep 5.9.3 active until the Engine is installed, configured and loading successfully. Back up HA, the dashboard, resource URL and previous files before testing. The Engine can execute schedules, timers and volume rules even when the dashboard is closed.
@@ -19,7 +19,7 @@
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=r11a&repository=homeii-flow-engine&category=integration)
 
-HACS must already be installed. This is a **custom repository**, not an official HACS default listing. If the button cannot find it, open **HACS → ⋮ → Custom repositories**, add `https://github.com/r11a/homeii-flow-engine`, choose **Integration**, and add it. Open HOMEii Flow Engine, install **1.0.0**, then **restart Home Assistant**. The button opens HACS; it does not silently install anything.
+HACS must already be installed. This is a **custom repository**, not an official HACS default listing. If the button cannot find it, open **HACS → ⋮ → Custom repositories**, add `https://github.com/r11a/homeii-flow-engine`, choose **Integration**, and add it. Open HOMEii Flow Engine, install **1.0.1**, then **restart Home Assistant**. The button opens HACS; it does not silently install anything.
 
 ### 2. Add and configure the integration after restarting
 
@@ -37,7 +37,7 @@ If My Home Assistant opens the wrong server, change its instance URL to your own
 
 ### Manual installation without HACS
 
-Download [homeii-flow-engine-1.0.0.zip](https://github.com/r11a/homeii-flow-engine/releases/download/v1.0.0/homeii-flow-engine-1.0.0.zip), extract it, and copy the complete `custom_components/homeii_flow` folder into `/config/custom_components/`. The resulting file must be `/config/custom_components/homeii_flow/manifest.json`. Restart HA, then use **Add integration** above. Do not create an extra nested `custom_components` directory.
+Download [homeii-flow-engine-1.0.1.zip](https://github.com/r11a/homeii-flow-engine/releases/download/v1.0.1/homeii-flow-engine-1.0.1.zip), extract it, and copy the complete `custom_components/homeii_flow` folder into `/config/custom_components/`. The resulting file must be `/config/custom_components/homeii_flow/manifest.json`. Restart HA, then use **Add integration** above. Do not create an extra nested `custom_components` directory.
 
 ## Artwork lighting and listening insights (local beta candidate)
 
@@ -53,8 +53,8 @@ Radio Browser station queries can also run through the Engine (`radio/search`). 
 
 | Component | What it does | Repository |
 |---|---|---|
-| Music Flow `6.0.0` | Artwork-driven player, contextual wheels, library, queue, lyrics and touch interface | [HOMEii Music Flow](https://github.com/r11a/homeii-music-flow) |
-| Flow Engine `1.0.0` | Required HA integration that connects the card and automations to MA | [HOMEii Flow Engine](https://github.com/r11a/homeii-flow-engine) |
+| Music Flow `6.0.1` | Artwork-driven player, contextual wheels, library, queue, lyrics and touch interface | [HOMEii Music Flow](https://github.com/r11a/homeii-music-flow) |
+| Flow Engine `1.0.1` | Required HA integration that connects the card and automations to MA | [HOMEii Flow Engine](https://github.com/r11a/homeii-flow-engine) |
 
 The Engine is **not an add-on or a Music Assistant server**. It does not replace MA or HA's official Music Assistant integration. The browser connects to HA; the Engine maintains authenticated MA access and shares useful state with the card. MA remains authoritative for players, media and queues.
 
@@ -150,7 +150,7 @@ Keep the official MA integration installed. First resolve failures in native MA;
 
 ## Connect the card
 
-After the Engine loads, install the exact matching `6.0.0` card. Configure connection credentials in the Engine only:
+After the Engine loads, install the exact matching `6.0.1` card. Configure connection credentials in the Engine only:
 
 ```yaml
 type: custom:homeii-music-flow
@@ -317,6 +317,4 @@ The Smart screen also edits the existing system screensaver and artwork-lighting
 
 Choose Automatic to create a dedicated token using your Music Assistant built-in username and password (not your Home Assistant credentials). The password is not stored. Alternatively choose Manual and paste a long-lived token from Music Assistant Settings → Profile. HA ingress URLs are rejected with guidance to use the direct MA server address. Keep Instance ID and Default Profile ID as default for a standard single installation.
 
-[Beginner installation and rollback guide](https://github.com/r11a/homeii-music-flow/blob/v6.0.0/docs/INSTALL_STEP_BY_STEP.md).
-
-
+[Beginner installation and rollback guide](https://github.com/r11a/homeii-music-flow/blob/v6.0.1/docs/INSTALL_STEP_BY_STEP.md).
