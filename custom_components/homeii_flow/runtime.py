@@ -6,6 +6,9 @@ from .artwork_lighting import ArtworkLighting
 from .queue_settings import async_queue_settings
 from .player_timing import playback_position_pair
 from .queue_controls import build_queue_switch, build_playback_speed
+from .playback_requests import PlaybackRequests
+from .volume_transitions import start_transition, cancel_transition
+from .queue_copy import copy_queue
 
 import asyncio
 import copy
@@ -943,14 +946,15 @@ class HomeiiScheduleManager:
 class HomeiiFlowRuntime:
     """Shared runtime used by WebSocket commands and services."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, *, storage_namespace: str = "") -> None:
         """Initialize runtime."""
         self.hass = hass
-        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._storage_namespace = storage_namespace
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY + storage_namespace)
         self._media_cache_store: Store[dict[str, Any]] = Store(
             hass,
             MEDIA_CACHE_STORAGE_VERSION,
-            MEDIA_CACHE_STORAGE_KEY,
+            MEDIA_CACHE_STORAGE_KEY + storage_namespace,
         )
         self._entries: dict[str, EngineEntry] = {}
         self._storage: dict[str, Any] = {
@@ -1120,7 +1124,7 @@ class HomeiiFlowRuntime:
             return clean
         token = self._artwork_source_tokens.get(clean, "")
         if not token or token not in self._artwork_sources:
-            token = hashlib.blake2s(clean.encode("utf-8"), digest_size=18).hexdigest()
+            token = hashlib.blake2s((getattr(self, "_storage_namespace", "") + clean).encode("utf-8"), digest_size=18).hexdigest()
             self._artwork_source_tokens[clean] = token
         self._artwork_sources[token] = (clean, time.monotonic() + 7 * 24 * 60 * 60)
         if len(self._artwork_sources) > 5000:
@@ -1793,6 +1797,7 @@ class HomeiiFlowRuntime:
         if isinstance(stored, dict):
             self._storage.update(
                 {
+                    "legacy_owner_entry_id": stored.get("legacy_owner_entry_id") or "",
                     "schedules": _safe_list(stored.get("schedules")),
                     "timers": _safe_list(stored.get("timers")),
                     "volume_rules": _safe_list(stored.get("volume_rules")),
@@ -1802,6 +1807,7 @@ class HomeiiFlowRuntime:
                     "interface_preferences": stored.get("interface_preferences") if isinstance(stored.get("interface_preferences"), dict) else {},
                     "wheel_preferences": stored.get("wheel_preferences") if isinstance(stored.get("wheel_preferences"), dict) else {},
                     "saved_playlists": stored.get("saved_playlists") if isinstance(stored.get("saved_playlists"), dict) else {},
+                    "listening_scenes": stored.get("listening_scenes") if isinstance(stored.get("listening_scenes"), dict) else {},
                     "screensaver": stored.get("screensaver") if isinstance(stored.get("screensaver"), dict) else {},
                     "artwork_lighting": stored.get("artwork_lighting") if isinstance(stored.get("artwork_lighting"), dict) else {},
                 }
@@ -1834,6 +1840,8 @@ class HomeiiFlowRuntime:
 
     def async_stop_orchestration(self) -> None:
         """Stop schedule and policy enforcement."""
+        for player in list(getattr(self, "_volume_transition_tasks", {})):
+            cancel_transition(self, player)
         if self._orchestration_unsub is None:
             return
         self._orchestration_unsub()
@@ -1964,6 +1972,9 @@ class HomeiiFlowRuntime:
             self._refresh_music_assistant_connection()
         else:
             self._music_assistant_client.configure("", "")
+            for task in (self._media_cache_warm_task, self._ma_health_probe_task):
+                if task is not None and not task.done():
+                    task.cancel()
 
     def _refresh_music_assistant_connection(self) -> None:
         """Apply the best available MA URL and token to the persistent event client."""
@@ -2071,7 +2082,7 @@ class HomeiiFlowRuntime:
                     changed_domains.append("queue")
                 if changed_domains:
                     self._bump_snapshot_revision(*changed_domains, reason=event_name or "music_assistant_event")
-        self.hass.bus.async_fire(EVENT_MUSIC_ASSISTANT, dict(message))
+        self.hass.bus.async_fire(EVENT_MUSIC_ASSISTANT, {**message, "homeii_instance_id": self.entries[0].instance_id if self.entries else ""})
         if not progress_only:
             async_dispatcher_send(self.hass, SIGNAL_ENGINE_UPDATED)
 
@@ -2353,6 +2364,8 @@ class HomeiiFlowRuntime:
                 candidate = _normalized_http_url(value)
                 if candidate and candidate not in urls:
                     urls.append(candidate)
+        if urls:
+            return urls
         try:
             entries = self.hass.config_entries.async_entries("music_assistant")
         except Exception:  # noqa: BLE001 - diagnostics should not fail setup
@@ -3248,6 +3261,17 @@ class HomeiiFlowRuntime:
         }
 
     async def async_play_media(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Keep only the latest pending immediate selection for each player."""
+        player = str(payload.get("player") or payload.get("entity_id") or payload.get("selected_player") or "").strip()
+        if player and str(payload.get("enqueue") or "play") in {"play", "replace", "shuffle"}:
+            if not hasattr(self, "_playback_requests"):
+                self._playback_requests = PlaybackRequests()
+            return await self._playback_requests.run(
+                self._resolve_ma_player_id(player), lambda: self._async_execute_play_media(payload)
+            )
+        return await self._async_execute_play_media(payload)
+
+    async def _async_execute_play_media(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Play media through the authoritative MA 2.10 queue API."""
         player = str(payload.get("player") or payload.get("entity_id") or payload.get("selected_player") or "").strip()
         media_id = str(
@@ -3295,7 +3319,10 @@ class HomeiiFlowRuntime:
                 "command": "player_queues/play_media",
                 "args": {
                     "queue_id": queue_id,
-                    "media": media_id,
+                    # Match MA's own library action: hand the selected URI to
+                    # its native resolver. Never fetch a complete track list as
+                    # a prerequisite to starting playback.
+                    "media": [media_id],
                     "option": queue_option,
                     "radio_mode": radio_mode,
                 },
@@ -3455,16 +3482,22 @@ class HomeiiFlowRuntime:
             raise ValueError("source_player and target_player are required")
         source_id = self._resolve_ma_player_id(source_player)
         target_id = self._resolve_ma_player_id(target_player)
-        source_queue_response = await self.async_music_assistant_command(
-            {"command": "player_queues/get_active_queue", "args": {"player_id": source_id}}
-        )
-        target_queue_response = await self.async_music_assistant_command(
-            {"command": "player_queues/get_active_queue", "args": {"player_id": target_id}}
+        source_queue_response, target_queue_response = await asyncio.gather(
+            self.async_music_assistant_command(
+                {"command": "player_queues/get_active_queue", "args": {"player_id": source_id}}
+            ),
+            self.async_music_assistant_command(
+                {"command": "player_queues/get_active_queue", "args": {"player_id": target_id}}
+            ),
         )
         source_queue = source_queue_response.get("data") if isinstance(source_queue_response, dict) else source_queue_response
         target_queue = target_queue_response.get("data") if isinstance(target_queue_response, dict) else target_queue_response
         source_queue_id = _clean_string(_dict_first(source_queue, "queue_id", "player_id") if isinstance(source_queue, dict) else "") or source_id
         target_queue_id = _clean_string(_dict_first(target_queue, "queue_id", "player_id") if isinstance(target_queue, dict) else "") or target_id
+        if payload.get("copy"):
+            result = await copy_queue(self, source_queue_id, target_queue_id, source_queue, auto_play)
+            self._bump_snapshot_revision("players", "queue", reason="queue_copy")
+            return result
         if source_queue_id == target_queue_id:
             return {"ok": True, "noop": True, "source_queue_id": source_queue_id, "target_queue_id": target_queue_id}
         await self.async_music_assistant_command(
@@ -3719,6 +3752,7 @@ class HomeiiFlowRuntime:
                 "player": rule.get("player"),
                 "enabled": bool(rule.get("enabled", True)),
                 "max_volume": rule.get("max_volume"),
+                "suspended_until": rule.get("suspended_until", ""),
                 "start_time": rule.get("start_time"),
                 "end_time": rule.get("end_time"),
                 "days": [int(day) for day in _safe_list(rule.get("days")) if str(day).strip()],
@@ -3794,6 +3828,7 @@ class HomeiiFlowRuntime:
             "time": str(payload.get("time") or "").strip(),
             "days": [int(day) for day in _safe_list(payload.get("days")) if str(day).strip()],
             "volume": payload.get("volume"),
+            "fade_seconds": _bounded_int(payload.get("fade_seconds"), 0, 0, 600),
             "enabled": bool(payload.get("enabled", True)),
             "after_run": "disable" if str(payload.get("after_run") or payload.get("afterRun") or "").strip() == "disable" else "keep",
             "updated_at": _utc_iso(),
@@ -3899,13 +3934,15 @@ class HomeiiFlowRuntime:
                 "executed_at": _utc_iso(),
             }
         volume = schedule.get("volume")
+        fade_seconds = _bounded_int(schedule.get("fade_seconds"), 0, 0, 600)
+        cancel_transition(self, player)
         volume_error = ""
         if volume is not None:
             try:
                 await self.async_call_service_response(
                     "media_player",
                     "volume_set",
-                    {"entity_id": player, "volume_level": max(0, min(100, int(volume))) / 100},
+                    {"entity_id": player, "volume_level": 0 if fade_seconds else max(0, min(100, int(volume))) / 100},
                     return_response=False,
                 )
             except Exception as err:  # noqa: BLE001 - volume must not block wake playback
@@ -3969,6 +4006,8 @@ class HomeiiFlowRuntime:
         else:
             play_error = str(resolution.get("error") or "No playable media was resolved for this schedule.")
 
+        if verified and fade_seconds and volume is not None and not volume_error:
+            start_transition(self, player, volume, fade_seconds)
         provider = play_result.get("provider") or ""
         error = ""
         if not verified:
@@ -4571,6 +4610,17 @@ class HomeiiFlowRuntime:
         clean = str(command or "").strip().lower()
         if clean == "info":
             return True
+        if clean.startswith("statistics/"):
+            return clean in {
+                "statistics/top_items",
+                "statistics/genre_distribution",
+                "statistics/decade_distribution",
+                "statistics/play_count",
+                "statistics/plays_over_time",
+                "statistics/listening_activity",
+                "statistics/listening_time",
+                "statistics/play_history",
+            }
         if clean == "music/playlists/add_playlist_tracks":
             return True
         if clean.startswith("ai_radio/"):
@@ -4810,11 +4860,21 @@ class HomeiiFlowRuntime:
         order_by: str = "",
         query: str = "",
         favorite_only: bool = False,
+        sort_field: str = "",
+        sort_direction: str = "",
+        album_artists_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Return the exact MA 2.10 library command for one media type."""
         base_payload: dict[str, Any] = {"limit": limit, "offset": offset}
         if order_by:
             base_payload["order_by"] = order_by
+        if sort_field:
+            base_payload.pop("order_by", None)
+            base_payload["sort_field"] = sort_field
+            if sort_direction:
+                base_payload["sort_direction"] = sort_direction
+        if media_type == "artist" and album_artists_only:
+            base_payload["album_artists_only"] = True
         if favorite_only:
             base_payload["favorite"] = True
         if query:
@@ -4849,6 +4909,9 @@ class HomeiiFlowRuntime:
         order_by: str = "",
         query: str = "",
         favorite_only: bool = False,
+        sort_field: str = "",
+        sort_direction: str = "",
+        album_artists_only: bool = False,
         profile_id: str = "",
     ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]]]:
         """Try Music Assistant server API as the Engine-owned library backend."""
@@ -4862,6 +4925,9 @@ class HomeiiFlowRuntime:
             order_by=order_by,
             query=query,
             favorite_only=favorite_only,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            album_artists_only=album_artists_only,
         )
         for command_attempt in bridge_attempts:
             command = command_attempt["command"]
@@ -5259,8 +5325,71 @@ class HomeiiFlowRuntime:
                 return number
         return 0
 
+    @staticmethod
+    def _compact_queue_snapshot(result: dict[str, Any]) -> dict[str, Any]:
+        """Keep every queue control and display field, without provider blobs or aliases."""
+        fields = {"queue_id", "queue_item_id", "queue_service_id", "queue_item_id_trusted", "id", "item_id", "uri",
+                  "media_type", "type", "name", "title", "version", "duration", "sort_index", "index", "position",
+                  "available", "favorite", "artist", "album_name", "provider", "provider_label", "explicit",
+                  "resume_position_ms", "fully_played", "chapter", "start", "end", "image", "image_url", "homeii_artwork_url"}
+        def item(value, depth=0):
+            if not isinstance(value, dict) or depth > 4:
+                return value if isinstance(value, (str, int, float, bool, type(None))) else None
+            clean = {key: child for key, child in value.items() if key in fields and isinstance(child, (str, int, float, bool, type(None)))}
+            for key in ("media_item", "album", "origin"):
+                if isinstance(value.get(key), dict):
+                    clean[key] = item(value[key], depth+1)
+            if isinstance(value.get("artists"), list):
+                clean["artists"] = [item(artist, depth+1) for artist in value["artists"]]
+            metadata = value.get("streamdetails", {}).get("stream_metadata") if isinstance(value.get("streamdetails"), dict) else None
+            if isinstance(metadata, dict):
+                clean["streamdetails"] = {"stream_metadata": item(metadata, depth+1)}
+            if clean.get("homeii_artwork_url"):
+                clean.pop("image", None)
+                clean.pop("image_url", None)
+            return clean
+        response = {key: value for key, value in result.items() if key not in {"data", "responses", "items"}}
+        for key in ("normalized", "queue_state"):
+            state = result.get(key)
+            if not isinstance(state, dict):
+                continue
+            state = dict(state)
+            if isinstance(state.get("items"), list):
+                state["items"] = [item(value) for value in state["items"]]
+            for name in ("current_item", "previous_item", "next_item"):
+                if isinstance(state.get(name), dict):
+                    state[name] = item(state[name])
+            if isinstance(state.get("radio_source"), list):
+                state["radio_source"] = [item(value) for value in state["radio_source"]]
+            response[key] = state
+        response["compact"] = True
+        return response
+
+    async def async_now_playing_snapshot(self, entity_id: str) -> dict[str, Any]:
+        """Read the authoritative current track without downloading the queue."""
+        if not entity_id:
+            raise ValueError("entity_id is required")
+        player_id = self._resolve_ma_player_id(entity_id)
+        response = await self.async_music_assistant_command({
+            "command": "player_queues/get_active_queue", "args": {"player_id": player_id},
+        })
+        active = response.get("data", response) if isinstance(response, dict) else response
+        queue_id = _clean_string(active.get("queue_id")) if isinstance(active, dict) else ""
+        queue_id = queue_id or player_id
+        response = await self.async_music_assistant_command({
+            "command": "player_queues/get", "args": {"queue_id": queue_id},
+        })
+        state = response.get("data", response) if isinstance(response, dict) else response
+        if not isinstance(state, dict):
+            raise HomeiiFlowServiceUnavailable("Music Assistant returned an invalid queue state.")
+        return {"state_only": True, "queue_state": self.decorate_artwork_urls({**state, "queue_id": queue_id})}
+
     async def async_get_queue(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the richest queue snapshot through the integration-owned backend path."""
+        if payload.get("compact") is True:
+            return self._compact_queue_snapshot(await self.async_get_queue({**payload, "compact": False}))
+        if payload.get("state_only") is True:
+            return await self.async_now_playing_snapshot(str(payload.get("entity_id") or payload.get("selected_player") or "").strip())
         request_revision = self._snapshot_revisions["queue"]
         entity_id = str(payload.get("entity_id") or payload.get("selected_player") or "").strip()
         queue_id = str(payload.get("queue_id") or "").strip()
@@ -5414,6 +5543,9 @@ class HomeiiFlowRuntime:
         order_by = str(payload.get("order_by") or "").strip()
         if order_by:
             data["order_by"] = order_by
+        sort_field = _clean_string(payload.get("sort_field"))
+        sort_direction = _clean_string(payload.get("sort_direction"))
+        album_artists_only = media_type == "artist" and bool(payload.get("album_artists_only"))
         favorite_only = bool(payload.get("favorite", False) or payload.get("favorites_only", False))
         if favorite_only:
             data["favorite"] = True
@@ -5434,6 +5566,9 @@ class HomeiiFlowRuntime:
             favorite_only,
             query.lower(),
             offset,
+            sort_field,
+            sort_direction,
+            album_artists_only,
         )
         refresh_requested = bool(payload.get("_refresh"))
         singleflight_owner = bool(payload.get("_singleflight_owner"))
@@ -5517,6 +5652,9 @@ class HomeiiFlowRuntime:
             order_by=order_by,
             query=query,
             favorite_only=favorite_only,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            album_artists_only=album_artists_only,
             profile_id=profile_id,
         )
         if bridge_response is None:
@@ -5990,9 +6128,17 @@ class HomeiiFlowRuntime:
         player = str(payload.get("player") or payload.get("entity_id") or "").strip()
         if not player:
             raise ValueError("player is required")
+        existing_rule = next((item for item in self.volume_rules(profile_id) if item.get("player") == player), {})
+        suspended_until = existing_rule.get("suspended_until", "")
+        if "suspend_minutes" in payload:
+            minutes = int(payload["suspend_minutes"])
+            if not 0 <= minutes <= 1440:
+                raise ValueError("suspend_minutes must be between 0 and 1440")
+            suspended_until = (datetime.now(UTC) + timedelta(minutes=minutes)).isoformat() if minutes else ""
         rule = {
             "profile_id": profile_id,
             "player": player,
+            "suspended_until": suspended_until,
             "enabled": bool(payload.get("enabled", True)),
             "max_volume": max(0, min(100, int(payload.get("max_volume") or 0))),
             "start_time": str(payload.get("start_time") or ""),
@@ -6105,6 +6251,9 @@ class HomeiiFlowRuntime:
     def _volume_rule_active(self, rule: dict[str, Any], now: datetime) -> bool:
         """Return whether a volume rule applies right now."""
         if not bool(rule.get("enabled", True)):
+            return False
+        suspended_until = _parse_utc_datetime(rule.get("suspended_until"))
+        if suspended_until is not None and suspended_until > now.astimezone(UTC):
             return False
         days = [int(day) for day in _safe_list(rule.get("days")) if str(day).strip()]
         if days and _homeii_weekday(now) not in days:

@@ -76,7 +76,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up HOMEii Flow Engine buttons."""
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     async_add_entities(HomeiiFlowButton(runtime, entry, description) for description in BUTTONS)
     profile_id = _profile_id(entry)
     known_schedule_buttons: dict[str, HomeiiFlowScheduleRunButton] = {}

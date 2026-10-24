@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "homeii_flow"
 NAME = "HOMEii Flow Engine"
-VERSION = "1.0.2"
+VERSION = "1.1.0"
 
 MUSIC_ASSISTANT_SCHEMA_MIN = 63
 MUSIC_ASSISTANT_SCHEMA_VALIDATED = 63
@@ -36,6 +36,7 @@ CAPABILITIES = {
     "interface_preferences": True,
     "wheel_preferences": True,
     "saved_playlists": True,
+    "listening_scenes": True,
     "radio_directory": True,
     "context": True,
     "bootstrap_snapshot": True,
@@ -109,6 +110,9 @@ CAPABILITIES = {
     "timer_management": True,
     "timer_execution": True,
     "volume_rules": True,
+    "queue_copy": True,
+    "schedule_volume_fade": True,
+    "volume_rule_suspension": True,
     "volume_rule_management": True,
     "volume_rule_enforcement": True,
     "announcements": True,

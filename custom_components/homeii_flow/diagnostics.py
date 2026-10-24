@@ -16,7 +16,7 @@ async def async_get_config_entry_diagnostics(
     entry: ConfigEntry,
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     profile_id = entry.options.get(CONF_PROFILE_ID) or entry.data.get(CONF_PROFILE_ID)
     return {
         "version": VERSION,

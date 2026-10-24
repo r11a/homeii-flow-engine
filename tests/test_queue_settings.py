@@ -67,7 +67,7 @@ class QueueSettingsPermissionTests(unittest.IsolatedAsyncioTestCase):
         function = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "websocket_queue_settings")
         function.decorator_list = []
         runtime = SimpleNamespace(async_queue_settings=AsyncMock(return_value={"entries": {}}))
-        ns = {"_runtime": lambda hass: runtime, "_command_payload": lambda msg: msg}
+        ns = {"_runtime": lambda hass, msg: runtime, "_command_payload": lambda msg: msg}
         exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), str(path), "exec"), ns)
         connection = SimpleNamespace(user=SimpleNamespace(is_admin=False), send_error=Mock(), send_result=Mock())
         await ns["websocket_queue_settings"](None, connection, {"id": 1, "values": {"autoplay_enabled": False}})

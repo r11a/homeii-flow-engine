@@ -1,7 +1,7 @@
 {
   "domain": "homeii_flow",
   "name": "HOMEii Flow Engine",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "codeowners": [
     "@r11a"
   ],

@@ -10,16 +10,18 @@ from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import ActiveConnection
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_INSTANCE_ID, CONF_PROFILE_ID, DOMAIN
+from .const import CONF_INSTANCE_ID, CONF_PROFILE_ID, DOMAIN, EVENT_MUSIC_ASSISTANT
 from .runtime import HomeiiFlowRuntime
+from .instance_registry import resolve_runtime
 from .radio_directory import search_stations
+from .listening_scenes import list_scenes, save_scene, run_scene, delete_scene
 from .saved_playlists import list_playlists, save_playlist, play_playlist, delete_playlist
 from .interface_preferences import read_preferences, save_preferences, read_wheel_preferences, save_wheel_preferences
 
 
-def _runtime(hass: HomeAssistant) -> HomeiiFlowRuntime:
+def _runtime(hass: HomeAssistant, msg: dict[str, Any]) -> HomeiiFlowRuntime:
     """Return the shared runtime."""
-    return hass.data[DOMAIN]["runtime"]
+    return resolve_runtime(hass.data[DOMAIN], msg.get(CONF_INSTANCE_ID))
 
 
 def _command_payload(msg: dict[str, Any]) -> dict[str, Any]:
@@ -42,6 +44,7 @@ BASE_SCHEMA = {
 
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register HOMEii Flow Engine websocket commands."""
+    websocket_api.async_register_command(hass, websocket_listening_scenes)
     websocket_api.async_register_command(hass, websocket_saved_playlists)
     websocket_api.async_register_command(hass, websocket_get_wheel_preferences)
     websocket_api.async_register_command(hass, websocket_set_wheel_preferences)
@@ -51,6 +54,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_set_artwork_lighting)
     websocket_api.async_register_command(hass, websocket_radio_search)
     websocket_api.async_register_command(hass, websocket_get_context)
+    websocket_api.async_register_command(hass, websocket_subscribe_music_assistant_events)
     websocket_api.async_register_command(hass, websocket_get_bootstrap)
     websocket_api.async_register_command(hass, websocket_get_required_connections)
     websocket_api.async_register_command(hass, websocket_run_diagnostics)
@@ -91,11 +95,53 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_sendspin_status)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homeii_flow/subscribe_music_assistant_events",
+        vol.Optional(CONF_INSTANCE_ID): str,
+        vol.Optional("selected_player"): str,
+    }
+)
+@callback
+def websocket_subscribe_music_assistant_events(
+    hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Forward invalidation signals without exposing raw MA event payloads."""
+    runtime = _runtime(hass, msg)
+    instance_id = str(msg.get(CONF_INSTANCE_ID) or "").strip()
+    primary = runtime._matching_entry()
+    if not primary or (instance_id and instance_id != primary.instance_id):
+        connection.send_error(msg["id"], "instance_unavailable", "Music Assistant event stream is unavailable for this instance")
+        return
+    selected_player = str(msg.get("selected_player") or "").strip()
+    if selected_player and not connection.user.permissions.check_entity(selected_player, "read"):
+        connection.send_error(msg["id"], "unauthorized", "Player is not accessible")
+        return
+
+    @callback
+    def forward(event: Any) -> None:
+        data = event.data if isinstance(event.data, dict) else {}
+        if data.get("homeii_instance_id") != primary.instance_id:
+            return
+        kind = str(data.get("kind") or "")
+        signal: dict[str, Any] = {"kind": kind, "event": str(data.get("event") or "")}
+        if kind == "connection":
+            status = data.get("connection") if isinstance(data.get("connection"), dict) else {}
+            signal["connection"] = {
+                "connected": status.get("connected") is True,
+                "authenticated": status.get("authenticated") is True,
+            }
+        connection.send_message(websocket_api.event_message(msg["id"], signal))
+
+    connection.subscriptions[msg["id"]] = hass.bus.async_listen(EVENT_MUSIC_ASSISTANT, forward)
+    connection.send_result(msg["id"])
+
+
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/get_context", **BASE_SCHEMA})
 @callback
 def websocket_get_context(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return Engine context."""
-    result = _runtime(hass).context(
+    result = _runtime(hass, msg).context(
         instance_id=msg.get(CONF_INSTANCE_ID),
         profile_id=msg.get(CONF_PROFILE_ID),
     )
@@ -107,7 +153,7 @@ def websocket_get_context(hass: HomeAssistant, connection: ActiveConnection, msg
 async def websocket_get_bootstrap(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return a coherent startup snapshot in one Home Assistant round trip."""
     try:
-        result = await _runtime(hass).async_bootstrap_snapshot(
+        result = await _runtime(hass, msg).async_bootstrap_snapshot(
             instance_id=msg.get(CONF_INSTANCE_ID),
             profile_id=msg.get(CONF_PROFILE_ID),
         )
@@ -120,21 +166,21 @@ async def websocket_get_bootstrap(hass: HomeAssistant, connection: ActiveConnect
 @callback
 def websocket_get_required_connections(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return required Engine connection health."""
-    connection.send_result(msg["id"], _runtime(hass).required_connections_snapshot())
+    connection.send_result(msg["id"], _runtime(hass, msg).required_connections_snapshot())
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/stats/get", **BASE_SCHEMA})
 @callback
 def websocket_get_stats(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return Engine stats."""
-    connection.send_result(msg["id"], _runtime(hass).stats())
+    connection.send_result(msg["id"], _runtime(hass, msg).stats())
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/playback_stats/get", **BASE_SCHEMA})
 @callback
 def websocket_get_playback_stats(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return passive playback statistics."""
-    connection.send_result(msg["id"], _runtime(hass).playback_statistics())
+    connection.send_result(msg["id"], _runtime(hass, msg).playback_statistics())
 
 
 @websocket_api.websocket_command(
@@ -149,7 +195,7 @@ def websocket_get_playback_stats(hass: HomeAssistant, connection: ActiveConnecti
 async def websocket_get_players(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return Engine player state."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_players_snapshot())
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_players_snapshot())
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "players_failed", str(err))
 
@@ -162,7 +208,7 @@ def websocket_run_diagnostics(
     msg: dict[str, Any],
 ) -> None:
     """Return Engine diagnostics."""
-    runtime = _runtime(hass)
+    runtime = _runtime(hass, msg)
     connection.send_result(
         msg["id"],
         {
@@ -194,7 +240,7 @@ def websocket_get_orchestration_status(
     msg: dict[str, Any],
 ) -> None:
     """Return Engine orchestration status."""
-    connection.send_result(msg["id"], _runtime(hass).orchestration_status())
+    connection.send_result(msg["id"], _runtime(hass, msg).orchestration_status())
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/orchestration/run_once", **BASE_SCHEMA})
@@ -206,7 +252,7 @@ async def websocket_run_orchestration_once(
 ) -> None:
     """Run one Engine orchestration pass."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_tick_orchestration())
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_tick_orchestration())
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "orchestration_run_failed", str(err))
 
@@ -237,7 +283,7 @@ async def websocket_play_media(
 ) -> None:
     """Play media through the Engine proxy."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_play_media(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_play_media(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "playback_failed", str(err))
 
@@ -271,7 +317,7 @@ async def websocket_player_command(
 ) -> None:
     """Run a media player command through the Engine proxy."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_player_command(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_player_command(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "player_command_failed", str(err))
 
@@ -292,7 +338,7 @@ async def websocket_music_assistant_command(
 ) -> None:
     """Run a Music Assistant command through the Engine server bridge."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_music_assistant_command(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_music_assistant_command(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "music_assistant_command_failed", str(err))
 
@@ -300,6 +346,8 @@ async def websocket_music_assistant_command(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "homeii_flow/queue/get",
+        vol.Optional("state_only"): bool,
+        vol.Optional("compact"): bool,
         **BASE_SCHEMA,
         vol.Optional("entity_id"): str,
         vol.Optional("selected_player"): str,
@@ -316,7 +364,7 @@ async def websocket_get_queue(
 ) -> None:
     """Return queue data."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_get_queue(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_get_queue(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "queue_failed", str(err))
 
@@ -343,7 +391,7 @@ async def websocket_queue_action(
 ) -> None:
     """Run a queue item action through the Engine."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_queue_action(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_queue_action(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "queue_action_failed", str(err))
 
@@ -358,6 +406,7 @@ async def websocket_queue_action(
         vol.Optional("target_entity_id"): str,
         vol.Optional("entity_id"): str,
         vol.Optional("auto_play", default=True): bool,
+        vol.Optional("copy", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -368,7 +417,7 @@ async def websocket_transfer_queue(
 ) -> None:
     """Transfer a Music Assistant queue through the Engine proxy."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_transfer_queue(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_transfer_queue(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "queue_transfer_failed", str(err))
 
@@ -378,12 +427,14 @@ async def websocket_transfer_queue(
         vol.Required("type"): "homeii_flow/library/get",
         **BASE_SCHEMA,
         vol.Optional("media_type"): str,
-        vol.Optional("type"): str,
         vol.Optional("query"): str,
         vol.Optional("search"): str,
         vol.Optional("search_query"): str,
         vol.Optional("name"): str,
         vol.Optional("order_by"): str,
+        vol.Optional("sort_field"): str,
+        vol.Optional("sort_direction"): str,
+        vol.Optional("album_artists_only", default=False): bool,
         vol.Optional("limit"): int,
         vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
         vol.Optional("favorite", default=False): bool,
@@ -399,7 +450,7 @@ async def websocket_get_library(
 ) -> None:
     """Return library data."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_get_library(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_get_library(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "library_failed", str(err))
 
@@ -421,7 +472,7 @@ async def websocket_get_favorites(
 ) -> None:
     """Return one aggregated Music Assistant favorites snapshot."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_get_favorites(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_get_favorites(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "favorites_failed", str(err))
 
@@ -448,7 +499,7 @@ async def websocket_set_favorite(
 ) -> None:
     """Add or remove a Music Assistant favorite through the Engine."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_set_favorite(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_set_favorite(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "favorite_mutation_failed", str(err))
 
@@ -476,7 +527,7 @@ async def websocket_get_search(
 ) -> None:
     """Return Music Assistant search data."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_get_search(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_get_search(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "search_failed", str(err))
 
@@ -500,7 +551,7 @@ async def websocket_apply_group(
 ) -> None:
     """Apply group changes."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_apply_group(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_apply_group(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "group_apply_failed", str(err))
 
@@ -509,7 +560,7 @@ async def websocket_apply_group(
 @callback
 def websocket_get_schedules(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return stored schedules."""
-    runtime = _runtime(hass)
+    runtime = _runtime(hass, msg)
     profile_id = msg.get(CONF_PROFILE_ID)
     connection.send_result(
         msg["id"],
@@ -543,6 +594,7 @@ def websocket_get_schedules(hass: HomeAssistant, connection: ActiveConnection, m
         vol.Optional("enqueue"): str,
         vol.Optional("radio_mode"): bool,
         vol.Optional("retry_attempts"): int,
+        vol.Optional("fade_seconds", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
         vol.Optional("retry_delay"): int,
         vol.Optional("time"): str,
         vol.Optional("days", default=list): [int],
@@ -560,7 +612,7 @@ async def websocket_set_schedule(
 ) -> None:
     """Store a schedule."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_set_schedule(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_set_schedule(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "schedule_set_failed", str(err))
 
@@ -580,7 +632,7 @@ async def websocket_delete_schedule(
 ) -> None:
     """Delete a schedule."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_delete_schedule(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_delete_schedule(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "schedule_delete_failed", str(err))
 
@@ -601,7 +653,7 @@ async def websocket_run_schedule(
 ) -> None:
     """Run a stored schedule immediately."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_run_schedule_now(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_run_schedule_now(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "schedule_run_failed", str(err))
 
@@ -610,7 +662,7 @@ async def websocket_run_schedule(
 @callback
 def websocket_get_timers(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return stored timers."""
-    runtime = _runtime(hass)
+    runtime = _runtime(hass, msg)
     profile_id = msg.get(CONF_PROFILE_ID)
     connection.send_result(
         msg["id"],
@@ -647,7 +699,7 @@ async def websocket_set_timer(
 ) -> None:
     """Store a timer."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_set_timer(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_set_timer(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "timer_set_failed", str(err))
 
@@ -669,7 +721,7 @@ async def websocket_delete_timer(
 ) -> None:
     """Delete a timer."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_delete_timer(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_delete_timer(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "timer_delete_failed", str(err))
 
@@ -678,7 +730,7 @@ async def websocket_delete_timer(
 @callback
 def websocket_get_volume_rules(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return stored volume rules."""
-    runtime = _runtime(hass)
+    runtime = _runtime(hass, msg)
     profile_id = msg.get(CONF_PROFILE_ID)
     connection.send_result(
         msg["id"],
@@ -696,6 +748,7 @@ def websocket_get_volume_rules(hass: HomeAssistant, connection: ActiveConnection
         **BASE_SCHEMA,
         vol.Required("player"): str,
         vol.Required("max_volume"): int,
+        vol.Optional("suspend_minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
         vol.Optional("start_time"): str,
         vol.Optional("end_time"): str,
         vol.Optional("days", default=list): [int],
@@ -710,7 +763,7 @@ async def websocket_set_volume_rule(
 ) -> None:
     """Store a volume rule."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_set_volume_rule(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_set_volume_rule(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "volume_rule_failed", str(err))
 
@@ -730,7 +783,7 @@ async def websocket_delete_volume_rule(
 ) -> None:
     """Delete one volume rule."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_delete_volume_rule(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_delete_volume_rule(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "volume_rule_delete_failed", str(err))
 
@@ -745,7 +798,7 @@ async def websocket_clear_volume_rules(
     """Clear volume rules."""
     try:
         profile_id = str(msg.get(CONF_PROFILE_ID) or "default")
-        connection.send_result(msg["id"], await _runtime(hass).async_clear_volume_rules(profile_id))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_clear_volume_rules(profile_id))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "volume_rules_clear_failed", str(err))
 
@@ -754,14 +807,14 @@ async def websocket_clear_volume_rules(
 @callback
 def websocket_get_announcements(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return recorded announcements."""
-    connection.send_result(msg["id"], {"announcements": _runtime(hass).announcements(msg.get(CONF_PROFILE_ID))})
+    connection.send_result(msg["id"], {"announcements": _runtime(hass, msg).announcements(msg.get(CONF_PROFILE_ID))})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/activity/get", **BASE_SCHEMA})
 @callback
 def websocket_get_activity(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return recent Engine activity."""
-    runtime = _runtime(hass)
+    runtime = _runtime(hass, msg)
     profile_id = msg.get(CONF_PROFILE_ID)
     connection.send_result(
         msg["id"],
@@ -777,7 +830,7 @@ def websocket_get_activity(hass: HomeAssistant, connection: ActiveConnection, ms
 @callback
 def websocket_get_screensaver(hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]) -> None:
     """Return system-wide screensaver configuration and state."""
-    connection.send_result(msg["id"], _runtime(hass).screensaver_state(msg.get(CONF_PROFILE_ID)))
+    connection.send_result(msg["id"], _runtime(hass, msg).screensaver_state(msg.get(CONF_PROFILE_ID)))
 
 
 @websocket_api.websocket_command(
@@ -804,7 +857,7 @@ async def websocket_set_screensaver(
 ) -> None:
     """Store system-wide screensaver configuration."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_set_screensaver_config(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_set_screensaver_config(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "screensaver_set_failed", str(err))
 
@@ -823,7 +876,7 @@ async def websocket_show_screensaver(
 ) -> None:
     """Request loaded frontend screensaver agents to open immediately."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_request_screensaver_show(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_request_screensaver_show(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "screensaver_show_failed", str(err))
 
@@ -852,7 +905,7 @@ async def websocket_announce(
 ) -> None:
     """Send and record an announcement request."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).async_send_announcement(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).async_send_announcement(_command_payload(msg)))
     except Exception as err:  # noqa: BLE001 - surfaced to frontend diagnostics
         connection.send_error(msg["id"], "announce_failed", str(err))
 
@@ -871,7 +924,7 @@ def websocket_sendspin_status(
     msg: dict[str, Any],
 ) -> None:
     """Return Sendspin status."""
-    connection.send_result(msg["id"], _runtime(hass).sendspin_status(_command_payload(msg)))
+    connection.send_result(msg["id"], _runtime(hass, msg).sendspin_status(_command_payload(msg)))
 
 
 @websocket_api.websocket_command({
@@ -885,7 +938,7 @@ async def websocket_queue_settings(hass, connection, msg):
         connection.send_error(msg["id"], "unauthorized", "Administrator access is required to change shared MA preferences")
         return
     try:
-        result = await _runtime(hass).async_queue_settings(_command_payload(msg))
+        result = await _runtime(hass, msg).async_queue_settings(_command_payload(msg))
         result["can_edit"] = connection.user.is_admin
         connection.send_result(msg["id"], result)
     except Exception as err:  # noqa: BLE001 - explicit command failure
@@ -896,7 +949,7 @@ async def websocket_queue_settings(hass, connection, msg):
 @callback
 def websocket_get_artwork_lighting(hass, connection, msg):
     """Return persistent player/light assignments and their current status."""
-    connection.send_result(msg["id"], _runtime(hass).artwork_lighting.snapshot())
+    connection.send_result(msg["id"], _runtime(hass, msg).artwork_lighting.snapshot())
 
 
 @websocket_api.websocket_command({
@@ -909,7 +962,7 @@ def websocket_get_artwork_lighting(hass, connection, msg):
 async def websocket_set_artwork_lighting(hass, connection, msg):
     """Persist and apply a player's artwork lighting configuration."""
     try:
-        connection.send_result(msg["id"], await _runtime(hass).artwork_lighting.configure(_command_payload(msg)))
+        connection.send_result(msg["id"], await _runtime(hass, msg).artwork_lighting.configure(_command_payload(msg)))
     except Exception as err:
         connection.send_error(msg["id"], "lighting_failed", str(err))
 
@@ -921,7 +974,7 @@ async def websocket_set_artwork_lighting(hass, connection, msg):
 async def websocket_radio_search(hass, connection, msg):
     """Search the public station directory, preserving artwork through the Engine."""
     try:
-        connection.send_result(msg["id"], await search_stations(_runtime(hass), _command_payload(msg)))
+        connection.send_result(msg["id"], await search_stations(_runtime(hass, msg), _command_payload(msg)))
     except Exception as err:
         connection.send_error(msg["id"], "radio_search_failed", str(err))
 
@@ -929,7 +982,7 @@ async def websocket_radio_search(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/interface/get", **BASE_SCHEMA})
 @callback
 def websocket_get_interface_preferences(hass, connection, msg):
-    connection.send_result(msg["id"], read_preferences(_runtime(hass), msg.get("profile_id")))
+    connection.send_result(msg["id"], read_preferences(_runtime(hass, msg), msg.get("profile_id")))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/interface/set", **BASE_SCHEMA,
@@ -938,7 +991,7 @@ def websocket_get_interface_preferences(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_set_interface_preferences(hass, connection, msg):
     try:
-        connection.send_result(msg["id"], await save_preferences(_runtime(hass), _command_payload(msg)))
+        connection.send_result(msg["id"], await save_preferences(_runtime(hass, msg), _command_payload(msg)))
     except Exception as err:
         connection.send_error(msg["id"], "interface_set_failed", str(err))
 
@@ -946,7 +999,7 @@ async def websocket_set_interface_preferences(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/wheels/get", **BASE_SCHEMA})
 @callback
 def websocket_get_wheel_preferences(hass, connection, msg):
-    connection.send_result(msg["id"], read_wheel_preferences(_runtime(hass), msg.get("profile_id"), connection.user.id))
+    connection.send_result(msg["id"], read_wheel_preferences(_runtime(hass, msg), msg.get("profile_id"), connection.user.id))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homeii_flow/wheels/set", **BASE_SCHEMA,
@@ -955,7 +1008,7 @@ def websocket_get_wheel_preferences(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_set_wheel_preferences(hass, connection, msg):
     try:
-        result = await save_wheel_preferences(_runtime(hass), _command_payload(msg), connection.user.id, connection.user.is_admin)
+        result = await save_wheel_preferences(_runtime(hass, msg), _command_payload(msg), connection.user.id, connection.user.is_admin)
         connection.send_result(msg["id"], result)
     except Exception as err:
         connection.send_error(msg["id"], "wheel_save_failed", str(err))
@@ -967,7 +1020,7 @@ async def websocket_set_wheel_preferences(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_saved_playlists(hass, connection, msg):
     try:
-        runtime = _runtime(hass)
+        runtime = _runtime(hass, msg)
         payload = _command_payload(msg)
         if msg["action"] == "save": result = await save_playlist(runtime, payload)
         elif msg["action"] == "play": result = await play_playlist(runtime, payload)
@@ -976,3 +1029,32 @@ async def websocket_saved_playlists(hass, connection, msg):
         connection.send_result(msg["id"], result)
     except Exception as err:
         connection.send_error(msg["id"], "saved_playlist_failed", str(err))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homeii_flow/scenes", **BASE_SCHEMA,
+    vol.Optional("action", default="list"): vol.In(["list", "save", "run", "delete"]),
+    vol.Optional("scene_id"): str, vol.Optional("name"): str, vol.Optional("player"): str,
+    vol.Optional("media_id"): str, vol.Optional("members"): [str], vol.Optional("lights"): [str],
+    vol.Optional("volume"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0,max=100)))})
+@websocket_api.async_response
+async def websocket_listening_scenes(hass, connection, msg):
+    try:
+        runtime = _runtime(hass, msg)
+        payload = _command_payload(msg)
+        action = msg["action"]
+        if action in {"save", "delete"} and not connection.user.is_admin:
+            connection.send_error(msg["id"], "unauthorized", "Only administrators can change shared listening scenes")
+            return
+        if action == "run" and not connection.user.is_admin:
+            item = next((item for item in list_scenes(runtime, msg.get("profile_id") or "default") if item["id"] == msg.get("scene_id")), None)
+            targets = [item["player"], *item["members"], *item["lights"]] if item else []
+            if not item or any(not target.startswith(("media_player.","light.")) or not connection.user.permissions.check_entity(target,"control") for target in targets):
+                connection.send_error(msg["id"], "unauthorized", "Scene targets are not accessible")
+                return
+        if action == "save": result = await save_scene(runtime, payload)
+        elif action == "run": result = await run_scene(runtime, payload)
+        elif action == "delete": result = await delete_scene(runtime, payload)
+        else: result = list_scenes(runtime, msg.get("profile_id") or "default")
+        connection.send_result(msg["id"], result)
+    except Exception as err:
+        connection.send_error(msg["id"], "scene_failed", str(err))

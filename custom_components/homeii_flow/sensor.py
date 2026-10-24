@@ -67,6 +67,23 @@ def _compact_required_connections(runtime: HomeiiFlowRuntime) -> dict[str, Any]:
 
 SENSORS: tuple[HomeiiFlowSensorDescription, ...] = (
     HomeiiFlowSensorDescription(
+        key="artwork_lighting_active", name="Artwork lighting active", icon="mdi:lightbulb-auto",
+        native_unit_of_measurement="players",
+        value_fn=lambda runtime, entry: sum(1 for rule in runtime.artwork_lighting.snapshot().get("rules", {}).values() if rule.get("enabled")),
+    ),
+    HomeiiFlowSensorDescription(
+        key="listening_scenes", name="Listening scenes", icon="mdi:music-box-multiple-outline",
+        native_unit_of_measurement="scenes",
+        value_fn=lambda runtime, entry: len(runtime._storage.get("listening_scenes", {}).get(_profile_id(entry), {})),
+        attrs_fn=lambda runtime, entry: {"scenes": [{"id":item["id"],"name":item["name"]} for item in runtime._storage.get("listening_scenes", {}).get(_profile_id(entry), {}).values()]},
+    ),
+    HomeiiFlowSensorDescription(
+        key="last_failed_action", name="Last failed action", icon="mdi:alert-circle-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda runtime, entry: next((str(item.get("kind")) for item in runtime.activity(_profile_id(entry)) if "failed" in str(item.get("kind"))), "none"),
+        attrs_fn=lambda runtime, entry: next(({"at":item.get("created_at"),"stage":(item.get("data") or {}).get("failed_step","")} for item in runtime.activity(_profile_id(entry)) if "failed" in str(item.get("kind"))), {}),
+    ),
+    HomeiiFlowSensorDescription(
         key="status",
         name="Status",
         icon="mdi:engine",
@@ -315,7 +332,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up HOMEii Flow Engine sensors."""
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     async_add_entities(HomeiiFlowSensor(runtime, entry, description) for description in SENSORS)
 
 

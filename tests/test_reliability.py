@@ -24,6 +24,10 @@ tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
 helpers = {"_dict_first", "_clean_string", "_safe_list", "_maybe_number", "_first_non_empty", "_safe_id_part", "_utc_iso", "_playback_snapshot_changed"}
 methods = {"_music_assistant_command_allowed", "_music_assistant_command_cacheable", "_music_assistant_command_cache_key", "async_music_assistant_command", "cached_stats", "stats", "_ha_entity_for_ma_player", "_normalize_ma_player", "_player_readiness", "async_players_snapshot", "async_play_media", "_try_music_queue_command_bridge", "normalize_queue_response", "_queue_payload_root", "_queue_payload_items", "_queue_payload_expected_count", "_resolve_ma_player_id", "is_music_assistant_player"}
 methods.update({"_media_type_command_roots", "_music_library_command_attempts", "_try_music_library_command_bridge", "_library_cache_entry", "_library_response", "async_get_library"})
+methods.add("async_transfer_queue")
+methods.update({"async_now_playing_snapshot", "async_get_queue"})
+methods.add("_compact_queue_snapshot")
+methods.add("_async_execute_play_media")
 nodes = [ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)]
 nodes.extend(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in helpers)
 runtime_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "HomeiiFlowRuntime")
@@ -35,10 +39,84 @@ namespace = {"time": time, "DEFAULT_PROFILE_ID": "default", "asyncio": asyncio, 
              "HomeiiFlowServiceUnavailable": RuntimeError, "er": SimpleNamespace(async_get=lambda _: registry)}
 exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(SOURCE), "exec"), namespace)
 exec((ROOT / "custom_components/homeii_flow/player_timing.py").read_text(encoding="utf-8"), namespace)
+exec((ROOT / "custom_components/homeii_flow/playback_requests.py").read_text(encoding="utf-8"), namespace)
 Runtime = namespace["HomeiiFlowRuntime"]
 
 
 class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
+    def test_library_filter_and_typed_sort_reach_music_assistant(self):
+        runtime = Runtime()
+        attempts = runtime._music_library_command_attempts(
+            media_type="artist", limit=50, offset=100, order_by="name",
+            sort_field="name", sort_direction="desc", album_artists_only=True,
+        )
+        self.assertEqual(attempts[0]["command"], "music/artists/library_items")
+        self.assertEqual(attempts[0]["payloads"][0], {
+            "limit": 50, "offset": 100, "sort_field": "name",
+            "sort_direction": "desc", "album_artists_only": True,
+        })
+
+    async def test_transfer_reads_source_and_target_queues_concurrently(self):
+        runtime = Runtime()
+        runtime._resolve_ma_player_id = lambda player: player
+        runtime._bump_snapshot_revision = Mock()
+        runtime._stats_cache = None
+        started = []
+        both_started = asyncio.Event()
+
+        async def command(payload):
+            if payload["command"] == "player_queues/get_active_queue":
+                started.append(payload["args"]["player_id"])
+                if len(started) == 2:
+                    both_started.set()
+                await both_started.wait()
+                return {"data": {"queue_id": payload["args"]["player_id"]}}
+            return {"data": None}
+
+        runtime.async_music_assistant_command = AsyncMock(side_effect=command)
+        result = await asyncio.wait_for(runtime.async_transfer_queue({
+            "source_player": "source", "target_player": "target",
+        }), timeout=0.5)
+        self.assertEqual(set(started), {"source", "target"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(runtime.async_music_assistant_command.call_args_list[-1].args[0]["command"], "player_queues/transfer")
+
+    def test_compact_queue_keeps_all_control_ids_without_duplicate_provider_payload(self):
+        import json
+        item = {"queue_item_id": "queue-control-id", "sort_index": 73, "uri": "library://track/1", "duration": 210,
+                "homeii_artwork_url": "/api/homeii_flow/artwork/item/cover", "origin": {"name": "Playlist", "uri": "library://playlist/1"},
+                "media_item": {"name": "Track", "uri": "library://track/1", "favorite": True,
+                               "artists": [{"name": "Artist", "uri": "library://artist/1"}], "metadata": {"description": "x"*20000}},
+                "streamdetails": {"path": "private-provider-path", "data": "x"*20000}}
+        original = {"normalized": {"items": [item]*100, "current_item": item, "items_count": 100, "current_index": 73},
+                    "items": [item]*100, "snapshot": {"revision": 4}, "coverage": {"complete": True}}
+        compact = Runtime._compact_queue_snapshot(original)
+        self.assertNotIn("items", compact)
+        self.assertEqual(len(compact["normalized"]["items"]), 100)
+        self.assertEqual(compact["normalized"]["current_item"]["queue_item_id"], "queue-control-id")
+        self.assertEqual(compact["normalized"]["current_item"]["sort_index"], 73)
+        self.assertEqual(compact["normalized"]["current_item"]["homeii_artwork_url"], item["homeii_artwork_url"])
+        self.assertTrue(compact["normalized"]["current_item"]["media_item"]["favorite"])
+        self.assertEqual(compact["normalized"]["current_item"]["origin"]["uri"], "library://playlist/1")
+        self.assertLess(len(json.dumps(compact)),len(json.dumps(original))//10)
+        self.assertIn("metadata", original["normalized"]["current_item"]["media_item"])
+
+    async def test_now_playing_does_not_wait_for_full_queue_or_unrelated_revision(self):
+        runtime = Runtime()
+        runtime._resolve_ma_player_id = lambda entity: "native"
+        runtime.decorate_artwork_urls = lambda value: value
+        runtime.async_music_assistant_command = AsyncMock(side_effect=[
+            {"data": {"queue_id": "group-owner"}},
+            {"data": {"queue_id": "group-owner", "state": "playing", "items": 4000,
+                      "current_item": {"queue_item_id": "new-track"}}},
+        ])
+        result = await runtime.async_get_queue({"entity_id": "native", "state_only": True})
+        self.assertEqual(result["queue_state"]["current_item"]["queue_item_id"], "new-track")
+        self.assertTrue(result["state_only"])
+        self.assertEqual([c.args[0]["command"] for c in runtime.async_music_assistant_command.call_args_list],
+                         ["player_queues/get_active_queue", "player_queues/get"])
+        self.assertEqual(runtime.async_music_assistant_command.call_args_list[1].args[0]["args"]["queue_id"], "group-owner")
+
     def test_playlist_append_is_allowed_without_opening_playlist_administration(self):
         self.assertTrue(Runtime._music_assistant_command_allowed("music/playlists/add_playlist_tracks"))
         self.assertFalse(Runtime._music_assistant_command_allowed("music/playlists/create_playlist"))
@@ -248,6 +326,47 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_playback_verifies_new_queue_item(self):
         result = await self.play("play", {"state": "playing", "current_item": {"queue_item_id": "new"}})
         self.assertTrue(result["verified"])
+
+    async def test_playlist_playback_matches_native_ma_without_prerequisite_library_reads(self):
+        async def command(payload):
+            return {"data": {"queue_id": "native"}}
+        self.runtime.async_music_assistant_command = AsyncMock(side_effect=command)
+        await self.runtime.async_play_media({"player": "native", "media_id": "library://playlist/12", "media_type": "playlist"})
+        calls = [call.args[0] for call in self.runtime.async_music_assistant_command.call_args_list]
+        self.assertEqual([call["command"] for call in calls], ["player_queues/get_active_queue", "player_queues/play_media"])
+        self.assertEqual(calls[-1]["args"]["media"], ["library://playlist/12"])
+        self.assertEqual(calls[-1]["args"]["option"], "replace")
+
+    async def test_failed_queue_lookup_never_mutates_or_replays_queue(self):
+        async def command(payload):
+            raise RuntimeError("Queue unavailable")
+        self.runtime.async_music_assistant_command = AsyncMock(side_effect=command)
+        with self.assertRaisesRegex(RuntimeError, "Queue unavailable"):
+            await self.runtime.async_play_media({"player": "native", "media_id": "library://playlist/12", "media_type": "playlist"})
+        self.assertNotIn("player_queues/play_media", [call.args[0]["command"] for call in self.runtime.async_music_assistant_command.call_args_list])
+
+    async def test_intermediate_selection_is_cancelled_before_dispatch_to_ma(self):
+        waiting = asyncio.Event()
+        release = asyncio.Event()
+        async def command(payload):
+            if payload["command"] == "player_queues/play_media" and payload["args"]["media"] == ["library://playlist/old"]:
+                waiting.set()
+                await release.wait()
+            return {"data": {"queue_id": "native"}}
+        self.runtime.async_music_assistant_command = AsyncMock(side_effect=command)
+        old = asyncio.create_task(self.runtime.async_play_media({"player": "native", "media_id": "library://playlist/old", "media_type": "playlist"}))
+        await waiting.wait()
+        middle = asyncio.create_task(self.runtime.async_play_media({"player": "native", "media_id": "library://track/middle", "media_type": "track"}))
+        await asyncio.sleep(0)
+        latest = asyncio.create_task(self.runtime.async_play_media({"player": "native", "media_id": "library://track/new", "media_type": "track"}))
+        await asyncio.sleep(0)
+        release.set()
+        await old
+        with self.assertRaisesRegex(RuntimeError, "newer media selection"):
+            await middle
+        await latest
+        mutations = [call.args[0] for call in self.runtime.async_music_assistant_command.call_args_list if call.args[0]["command"] == "player_queues/play_media"]
+        self.assertEqual([call["args"]["media"] for call in mutations], [["library://playlist/old"], ["library://track/new"]])
 
     async def test_old_playing_track_does_not_confirm_new_request(self):
         with self.assertRaisesRegex(RuntimeError, "did not confirm"):

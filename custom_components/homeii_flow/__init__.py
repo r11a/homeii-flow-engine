@@ -34,6 +34,8 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
+from .instance_registry import resolve_runtime
+from .listening_scenes import run_scene
 from .queue_settings import FIELD_TYPES
 from .runtime import HomeiiFlowRuntime
 from .websocket_api import async_register_websocket_commands
@@ -54,7 +56,7 @@ SERVICE_ANNOUNCE = "announce"
 SERVICE_PLAY_MEDIA = "play_media"
 SERVICE_PLAYER_COMMAND = "player_command"
 SERVICE_SET_QUEUE_SETTINGS = "set_queue_settings"
-SERVICE_SET_QUEUE_SETTINGS_SCHEMA = vol.Schema({vol.Optional(key): kind for key, kind in FIELD_TYPES.items()})
+SERVICE_SET_QUEUE_SETTINGS_SCHEMA = vol.Schema({**{vol.Optional(key): kind for key, kind in FIELD_TYPES.items()}, vol.Optional(CONF_INSTANCE_ID): str})
 SERVICE_TRANSFER_QUEUE = "transfer_queue"
 SERVICE_RUN_ORCHESTRATION = "run_orchestration"
 SERVICE_SET_SCREENSAVER = "set_screensaver"
@@ -62,9 +64,11 @@ SERVICE_SHOW_SCREENSAVER = "show_screensaver"
 
 SERVICE_SET_VOLUME_RULE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("player"): str,
         vol.Required("max_volume"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Optional("suspend_minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
         vol.Optional("start_time", default=""): str,
         vol.Optional("end_time", default=""): str,
         vol.Optional("days", default=list): [int],
@@ -74,12 +78,14 @@ SERVICE_SET_VOLUME_RULE_SCHEMA = vol.Schema(
 
 SERVICE_CLEAR_VOLUME_RULES_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
     }
 )
 
 SERVICE_DELETE_VOLUME_RULE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("player"): str,
     }
@@ -87,6 +93,7 @@ SERVICE_DELETE_VOLUME_RULE_SCHEMA = vol.Schema(
 
 SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Optional("id"): str,
         vol.Optional("schedule_id"): str,
@@ -105,6 +112,7 @@ SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
         vol.Optional("selection_mode"): str,
         vol.Optional("enqueue", default="play"): str,
         vol.Optional("radio_mode", default=False): bool,
+        vol.Optional("fade_seconds", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
         vol.Optional("retry_attempts", default=4): vol.All(vol.Coerce(int), vol.Range(min=1, max=12)),
         vol.Optional("retry_delay", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
         vol.Required("time"): str,
@@ -117,6 +125,7 @@ SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
 
 SERVICE_DELETE_SCHEDULE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("id"): str,
         vol.Optional("schedule_id"): str,
@@ -125,6 +134,7 @@ SERVICE_DELETE_SCHEDULE_SCHEMA = vol.Schema(
 
 SERVICE_RUN_SCHEDULE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("id"): str,
         vol.Optional("schedule_id"): str,
@@ -133,6 +143,7 @@ SERVICE_RUN_SCHEDULE_SCHEMA = vol.Schema(
 
 SERVICE_SET_TIMER_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Optional("id"): str,
         vol.Optional("timer_id"): str,
@@ -147,6 +158,7 @@ SERVICE_SET_TIMER_SCHEMA = vol.Schema(
 
 SERVICE_DELETE_TIMER_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Optional("id"): str,
         vol.Optional("timer_id"): str,
@@ -156,6 +168,7 @@ SERVICE_DELETE_TIMER_SCHEMA = vol.Schema(
 
 SERVICE_ANNOUNCE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("message"): str,
         vol.Optional("player"): str,
@@ -171,6 +184,7 @@ SERVICE_ANNOUNCE_SCHEMA = vol.Schema(
 
 SERVICE_PLAY_MEDIA_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("player"): str,
         vol.Required("media_id"): str,
@@ -182,6 +196,7 @@ SERVICE_PLAY_MEDIA_SCHEMA = vol.Schema(
 
 SERVICE_PLAYER_COMMAND_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("player"): str,
         vol.Required("command"): str,
@@ -198,15 +213,18 @@ SERVICE_PLAYER_COMMAND_SCHEMA = vol.Schema(
 
 SERVICE_TRANSFER_QUEUE_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Required("source_player"): str,
         vol.Required("target_player"): str,
         vol.Optional("auto_play", default=True): bool,
+        vol.Optional("copy", default=False): bool,
     }
 )
 
 SERVICE_SET_SCREENSAVER_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Optional("enabled"): bool,
         vol.Optional("timeout_seconds"): vol.All(vol.Coerce(int), vol.Range(min=15, max=3600)),
@@ -223,6 +241,7 @@ SERVICE_SET_SCREENSAVER_SCHEMA = vol.Schema(
 
 SERVICE_SHOW_SCREENSAVER_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_INSTANCE_ID): str,
         vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str,
         vol.Optional("source", default="service"): str,
     }
@@ -298,7 +317,7 @@ class HomeiiFlowArtworkProxyView(HomeAssistantView):
 
     async def get(self, request: web.Request, entity_id: str) -> web.Response:
         """Return current artwork for a media player entity."""
-        runtime = async_get_runtime(self.hass)
+        runtime = resolve_runtime(self.hass.data[DOMAIN], request.query.get(CONF_INSTANCE_ID))
         player = next(
             (
                 item
@@ -370,7 +389,7 @@ class HomeiiFlowArtworkProxyView(HomeAssistantView):
         if source.startswith("//"):
             return [f"{request.scheme}:{source}"]
         if source.startswith("http://") or source.startswith("https://"):
-            candidates = [source]
+            candidates = []
             parsed = urlparse(source)
             path_index = parsed.path.find("/imageproxy")
             imageproxy_path = parsed.path[path_index:] if path_index >= 0 else ""
@@ -378,6 +397,7 @@ class HomeiiFlowArtworkProxyView(HomeAssistantView):
                 suffix = f"{imageproxy_path}{f'?{parsed.query}' if parsed.query else ''}"
                 for base_url in ma_base_urls:
                     candidates.append(f"{base_url.rstrip('/')}{suffix}")
+            candidates.append(source)
             if parsed.path.rstrip("/").endswith("/imageproxy"):
                 query = parse_qs(parsed.query)
                 provider = str((query.get("provider") or ["builtin"])[0] or "builtin")
@@ -439,8 +459,9 @@ class HomeiiFlowItemArtworkProxyView(HomeiiFlowArtworkProxyView):
 
     async def get(self, request: web.Request, token: str) -> web.Response:
         """Return artwork for an opaque Engine token."""
-        runtime = async_get_runtime(self.hass)
-        source = runtime.resolve_artwork_source(token)
+        candidates = list(self.hass.data[DOMAIN].get("instance_runtimes", {}).values()) or [async_get_runtime(self.hass)]
+        runtime = next((candidate for candidate in candidates if candidate.resolve_artwork_source(token)), None)
+        source = runtime.resolve_artwork_source(token) if runtime else ""
         if not source:
             raise web.HTTPNotFound(text="artwork token not found or expired")
         cached = runtime.cached_artwork_content(source)
@@ -491,14 +512,14 @@ class HomeiiFlowCommandView(HomeAssistantView):
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        runtime = async_get_runtime(self.hass)
+        runtime = async_get_runtime(self.hass, instance_id=payload.get(CONF_INSTANCE_ID, ""))
         clean_command = str(command or "").strip().strip("/")
         instance_id = str(payload.get(CONF_INSTANCE_ID) or "").strip() or None
         profile_id = str(payload.get(CONF_PROFILE_ID) or "").strip() or None
         if clean_command == "get_context":
             result = runtime.context(instance_id=instance_id, profile_id=profile_id)
         elif clean_command == "bootstrap/get":
-            result = runtime.bootstrap_snapshot(instance_id=instance_id, profile_id=profile_id)
+            result = await runtime.async_bootstrap_snapshot(instance_id=instance_id, profile_id=profile_id)
         elif clean_command == "queue/get":
             result = await runtime.async_get_queue(payload)
         elif clean_command == "library/get":
@@ -524,7 +545,24 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HOMEii Flow Engine from a config entry."""
-    runtime = await async_prepare_runtime(hass)
+    primary = await async_prepare_runtime(hass)
+    data = hass.data[DOMAIN]
+    runtimes = data.setdefault("instance_runtimes", {})
+    # Stable first configured entry retains the legacy storage and default route.
+    configured = hass.config_entries.async_entries(DOMAIN)
+    primary_id = primary._storage.get("legacy_owner_entry_id")
+    if not primary_id:
+        primary_id = configured[0].entry_id if configured else entry.entry_id
+        primary._storage["legacy_owner_entry_id"] = primary_id
+        await primary.async_save()
+    runtime = runtimes.get(entry.entry_id)
+    if runtime is None:
+        runtime = primary if entry.entry_id == primary_id else HomeiiFlowRuntime(hass, storage_namespace="_" + entry.entry_id)
+        if runtime is not primary:
+            await runtime.async_load()
+        runtimes[entry.entry_id] = runtime
+    runtime.async_start_orchestration()
+    runtime.artwork_lighting.start()
     instance_id = str(entry.data.get(CONF_INSTANCE_ID) or DEFAULT_INSTANCE_ID)
     profile_id = str(entry.options.get(CONF_PROFILE_ID) or entry.data.get(CONF_PROFILE_ID) or DEFAULT_PROFILE_ID)
     enable_experimental = bool(entry.options.get(CONF_ENABLE_EXPERIMENTAL, False))
@@ -563,8 +601,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
         return False
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     runtime.unregister_entry(entry.entry_id)
+    runtime.async_stop_orchestration()
+    runtime.artwork_lighting.stop()
     return True
 
 
@@ -573,9 +613,15 @@ async def _async_update_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-def async_get_runtime(hass: HomeAssistant) -> HomeiiFlowRuntime:
+def async_get_runtime(hass: HomeAssistant, *, entry_id: str | None = None, instance_id: str | None = None) -> HomeiiFlowRuntime:
     """Return the HOMEii Flow runtime."""
     data = hass.data.setdefault(DOMAIN, {})
+    if entry_id is not None:
+        runtime = data.get("instance_runtimes", {}).get(entry_id)
+        if runtime is None: raise ValueError("HOMEii Engine entry is not loaded")
+        return runtime
+    if instance_id is not None:
+        return resolve_runtime(data, instance_id)
     runtime = data.get("runtime")
     if isinstance(runtime, HomeiiFlowRuntime):
         return runtime
@@ -615,60 +661,69 @@ async def async_prepare_runtime(hass: HomeAssistant) -> HomeiiFlowRuntime:
 
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register optional automation-facing services."""
+    async def handle_run_scene(call: ServiceCall) -> None:
+        result = await run_scene(async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, "")), dict(call.data))
+        if not result.get("ok"):
+            raise ServiceValidationError(f"Scene failed at {result.get('failed_step')}; completed: {', '.join(result.get('completed', []))}")
+
+    async_register_admin_service(hass, DOMAIN, "run_scene", handle_run_scene,
+        schema=vol.Schema({vol.Required("scene_id"): str, vol.Optional(CONF_INSTANCE_ID): str,
+            vol.Optional(CONF_PROFILE_ID, default=DEFAULT_PROFILE_ID): str}))
+
     async def set_interface_preferences(call: ServiceCall) -> None:
-        await save_preferences(hass.data[DOMAIN]["runtime"], dict(call.data))
+        await save_preferences(async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, "")), dict(call.data))
 
     if not hass.services.has_service(DOMAIN, "set_interface_preferences"):
         hass.services.async_register(DOMAIN, "set_interface_preferences", set_interface_preferences,
-            schema=vol.Schema({vol.Optional("profile_id"): str, vol.Optional("night_mode"): str,
+            schema=vol.Schema({vol.Optional(CONF_INSTANCE_ID): str, vol.Optional("profile_id"): str, vol.Optional("night_mode"): str,
                 vol.Optional("night_start"): str, vol.Optional("night_end"): str, vol.Optional("night_days"): [int]}))
 
 
     async def set_volume_rule(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_set_volume_rule(dict(call.data))
 
     async def clear_volume_rules(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_clear_volume_rules(str(call.data.get(CONF_PROFILE_ID) or DEFAULT_PROFILE_ID))
 
     async def delete_volume_rule(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_delete_volume_rule(dict(call.data))
 
     async def set_schedule(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_set_schedule(dict(call.data))
 
     async def delete_schedule(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_delete_schedule(dict(call.data))
 
     async def run_schedule(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_run_schedule_now(dict(call.data))
 
     async def set_timer(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_set_timer(dict(call.data))
 
     async def delete_timer(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_delete_timer(dict(call.data))
 
     async def announce(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_send_announcement(dict(call.data))
 
     async def play_media(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_play_media(dict(call.data))
 
     async def set_queue_settings(call: ServiceCall) -> None:
-        await async_get_runtime(hass).async_queue_settings({"values": dict(call.data)})
+        await async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, "")).async_queue_settings({"values": {key: value for key, value in call.data.items() if key in FIELD_TYPES}})
 
     async def player_command(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         try:
             await runtime.async_player_command(dict(call.data))
         except ValueError as error:
@@ -677,19 +732,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(str(error)) from error
 
     async def transfer_queue(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_transfer_queue(dict(call.data))
 
     async def run_orchestration(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_tick_orchestration()
 
     async def set_screensaver(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_set_screensaver_config(dict(call.data))
 
     async def show_screensaver(call: ServiceCall) -> None:
-        runtime = async_get_runtime(hass)
+        runtime = async_get_runtime(hass, instance_id=call.data.get(CONF_INSTANCE_ID, ""))
         await runtime.async_request_screensaver_show(dict(call.data))
 
     if not hass.services.has_service(DOMAIN, SERVICE_SET_VOLUME_RULE):

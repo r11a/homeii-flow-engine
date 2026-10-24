@@ -1,25 +1,29 @@
 <p align="center"><img src="logo.png" alt="HOMEii Flow" width="360"></p>
 <h1 align="center">HOMEii Flow Engine</h1>
 <p align="center"><strong>The connection between your music dashboard and your smart home.</strong><br>Music Assistant state, playback and home automation — through Home Assistant.</p>
-<p align="center"><img alt="Engine 1.0.2" src="https://img.shields.io/badge/Engine-1.0.2-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Stable" src="https://img.shields.io/badge/Status-STABLE-2ea44f"></p>
+<p align="center"><img alt="Engine 1.1.0" src="https://img.shields.io/badge/Engine-1.1.0-c89b56"><img alt="Home Assistant integration" src="https://img.shields.io/badge/Home_Assistant-custom_integration-41BDF5"><img alt="Stable" src="https://img.shields.io/badge/Status-STABLE-2ea44f"></p>
 <p align="center"><a href="https://github.com/r11a/homeii-music-flow">Music Flow card</a> · <a href="#installation">Installation</a> · <a href="#configuration-fields">Configuration</a> · <a href="#automations-you-can-build">Automations</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="docs/BETA_UPGRADE_HE.md">עברית</a></p>
 
 > [!IMPORTANT]
-> **Required stable pair: Engine `1.0.2` + card `6.0.2`. Install the Engine first.** Updating the card from 5.9.3 before the Engine is a breaking, unsupported order.
+> **Required stable pair: Engine `1.1.0` + card `6.1.0`. Install the Engine first.** Updating the card from 5.9.3 before the Engine is a breaking, unsupported order.
 
 > [!WARNING]
 > **Upgrading the card from 5.9.3 requires installing this Engine first.** The 6.0 card is not a standalone replacement JavaScript file. Keep 5.9.3 active until the Engine is installed, configured and loading successfully. Back up HA, the dashboard, resource URL and previous files before testing. The Engine can execute schedules, timers and volume rules even when the dashboard is closed.
 
 
+## New in 1.1.0
+
+Independent Engine instances, native playlist playback, non-admin event subscriptions, a corrected library API, persistent listening scenes, scheduled volume fades, temporary volume-limit suspension and finite queue copying. Read the [release notes, upgrade/rollback instructions and validation limits](RELEASE_NOTES_1.1.0.md) before updating.
+
 ## Install the Engine — start here
 
-**BETA: back up Home Assistant first. Install the Engine before upgrading the card from 5.9.3.**
+**Back up Home Assistant first. Install the Engine before upgrading the card from 5.9.3.**
 
 ### 1. Download with HACS
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=r11a&repository=homeii-flow-engine&category=integration)
 
-HACS must already be installed. This is a **custom repository**, not an official HACS default listing. If the button cannot find it, open **HACS → ⋮ → Custom repositories**, add `https://github.com/r11a/homeii-flow-engine`, choose **Integration**, and add it. Open HOMEii Flow Engine, install **1.0.2**, then **restart Home Assistant**. The button opens HACS; it does not silently install anything.
+HACS must already be installed. This is a **custom repository**, not an official HACS default listing. If the button cannot find it, open **HACS → ⋮ → Custom repositories**, add `https://github.com/r11a/homeii-flow-engine`, choose **Integration**, and add it. Open HOMEii Flow Engine, install **1.1.0**, then **restart Home Assistant**. The button opens HACS; it does not silently install anything.
 
 ### 2. Add and configure the integration after restarting
 
@@ -37,9 +41,9 @@ If My Home Assistant opens the wrong server, change its instance URL to your own
 
 ### Manual installation without HACS
 
-Download [homeii-flow-engine-1.0.2.zip](https://github.com/r11a/homeii-flow-engine/releases/download/v1.0.2/homeii-flow-engine-1.0.2.zip), extract it, and copy the complete `custom_components/homeii_flow` folder into `/config/custom_components/`. The resulting file must be `/config/custom_components/homeii_flow/manifest.json`. Restart HA, then use **Add integration** above. Do not create an extra nested `custom_components` directory.
+Download [homeii-flow-engine-1.1.0.zip](https://github.com/r11a/homeii-flow-engine/releases/download/v1.1.0/homeii-flow-engine-1.1.0.zip), extract it, and copy the complete `custom_components/homeii_flow` folder into `/config/custom_components/`. The resulting file must be `/config/custom_components/homeii_flow/manifest.json`. Restart HA, then use **Add integration** above. Do not create an extra nested `custom_components` directory.
 
-## Artwork lighting and listening insights (local beta candidate)
+## Artwork lighting and listening insights
 
 The Engine can maintain **per-player artwork lighting while the dashboard is closed**. Assign existing color-capable HA lights in the card's Smart Home settings, select the corresponding player, open **Players → Lighting follow**, and enable it. The Engine saves that player's assignment; enable additional players individually. Its `lighting/get` and `lighting/set` WebSocket commands return the stored rules and current status. Restarting HA preserves assignments. The card stops issuing parallel browser-side lighting commands when this capability is available.
 
@@ -53,8 +57,8 @@ Radio Browser station queries can also run through the Engine (`radio/search`). 
 
 | Component | What it does | Repository |
 |---|---|---|
-| Music Flow `6.0.2` | Artwork-driven player, contextual wheels, library, queue, lyrics and touch interface | [HOMEii Music Flow](https://github.com/r11a/homeii-music-flow) |
-| Flow Engine `1.0.2` | Required HA integration that connects the card and automations to MA | [HOMEii Flow Engine](https://github.com/r11a/homeii-flow-engine) |
+| Music Flow `6.1.0` | Artwork-driven player, contextual wheels, library, queue, lyrics and touch interface | [HOMEii Music Flow](https://github.com/r11a/homeii-music-flow) |
+| Flow Engine `1.1.0` | Required HA integration that connects the card and automations to MA | [HOMEii Flow Engine](https://github.com/r11a/homeii-flow-engine) |
 
 The Engine is **not an add-on or a Music Assistant server**. It does not replace MA or HA's official Music Assistant integration. The browser connects to HA; the Engine maintains authenticated MA access and shares useful state with the card. MA remains authoritative for players, media and queues.
 
@@ -150,7 +154,7 @@ Keep the official MA integration installed. First resolve failures in native MA;
 
 ## Connect the card
 
-After the Engine loads, install the exact matching `6.0.2` card. Configure connection credentials in the Engine only:
+After the Engine loads, install the exact matching `6.1.0` card. Configure connection credentials in the Engine only:
 
 ```yaml
 type: custom:homeii-music-flow
@@ -283,9 +287,9 @@ Stable releases are published as **Latest**. Always upgrade the Engine before th
 
 Open beta areas include long-running groups, device-specific DLNA, Safari/iOS background audio, audible TTS resume, timing/recovery scenarios and the broader card layout matrix. AI DJ depends on configured MA support. No claim is made that all open community requests are implemented.
 
-## Release 1.0.2
+## Release 1.1.0
 
-This maintenance package accompanies Music Flow 6.0.2. Runtime behavior is unchanged from Engine 1.0.1 apart from version reporting; the authenticated startup-probe and Recorder/state-dispatch fixes remain included. No storage migration or new card API is introduced. See the [release notes, issue status and credits](RELEASE_NOTES_1.0.2.md).
+This maintenance package accompanies Music Flow 6.1.0. Runtime behavior is unchanged from Engine 1.0.1 apart from version reporting; the authenticated startup-probe and Recorder/state-dispatch fixes remain included. No storage migration or new card API is introduced. See the [release notes, issue status and credits](RELEASE_NOTES_1.1.0.md).
 
 ## Reporting and contributing
 
@@ -300,7 +304,7 @@ python -B -m unittest discover -s tests
 python -B scripts/validate_repo.py
 ```
 
-Engine 1.0.2 passes 87 regression tests and repository validation. A passed unit suite does not certify every home installation. Runtime/state, MA transport, queue validation and Sendspin are separate responsibilities in the source, although `runtime.py` still needs further focused modularization.
+Engine 1.1.0 passes 87 regression tests and repository validation. A passed unit suite does not certify every home installation. Runtime/state, MA transport, queue validation and Sendspin are separate responsibilities in the source, although `runtime.py` still needs further focused modularization.
 
 ## Identity and credits
 
@@ -325,4 +329,4 @@ The Engine uses native Home Assistant entities and services; it does not publish
 
 Choose Automatic to create a dedicated token using your Music Assistant built-in username and password (not your Home Assistant credentials). The password is not stored. Alternatively choose Manual and paste a long-lived token from Music Assistant Settings → Profile. HA ingress URLs are rejected with guidance to use the direct MA server address. Keep Instance ID and Default Profile ID as default for a standard single installation.
 
-[Beginner installation and rollback guide](https://github.com/r11a/homeii-music-flow/blob/v6.0.2/docs/INSTALL_STEP_BY_STEP.md).
+[Beginner installation and rollback guide](https://github.com/r11a/homeii-music-flow/blob/v6.1.0/docs/INSTALL_STEP_BY_STEP.md).

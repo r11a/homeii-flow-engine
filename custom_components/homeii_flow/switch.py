@@ -54,7 +54,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up HOMEii Flow Engine schedule, timer and volume-rule switches."""
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     profile_id = _profile_id(entry)
     known_schedules: dict[str, HomeiiFlowScheduleSwitch] = {}
     known_timers: dict[str, HomeiiFlowTimerSwitch] = {}

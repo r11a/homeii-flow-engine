@@ -152,7 +152,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up HOMEii Flow Engine binary sensors."""
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     async_add_entities(HomeiiFlowBinarySensor(runtime, entry, description) for description in BINARY_SENSORS)
 
 

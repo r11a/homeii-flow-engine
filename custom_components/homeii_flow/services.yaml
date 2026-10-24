@@ -25,6 +25,14 @@ set_volume_rule:
           min: 0
           max: 100
           mode: slider
+    suspend_minutes:
+      name: Temporarily pause limit
+      description: Pause this rule for up to 24 hours. Zero resumes it now. Omit to preserve its current pause. Does not raise player volume.
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
     start_time:
       name: Start time
       description: Optional HH:MM start time.
@@ -184,6 +192,15 @@ set_schedule:
           min: 0
           max: 100
           mode: slider
+    fade_seconds:
+      name: Gentle wake-up
+      description: Start at zero and gradually reach the requested volume after playback is confirmed. Stops on pause or a manual volume change. Zero disables the fade.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 600
+          unit_of_measurement: s
     enabled:
       name: Enabled
       description: Whether this schedule is active.
@@ -513,6 +530,12 @@ transfer_queue:
       default: true
       selector:
         boolean:
+    copy:
+      name: Copy instead of transfer
+      description: Keep the source playing and replace the target queue with a snapshot. Requires auto play. Starts the current track from its beginning, without synchronization. Finite queues of up to 2000 items only.
+      default: false
+      selector:
+        boolean:
 
 run_orchestration:
   name: Run orchestration
@@ -660,3 +683,24 @@ set_interface_preferences:
       description: Days from 0 (Sunday) to 6 (Saturday).
       selector:
         object:
+
+run_scene:
+  name: Run listening scene
+  description: Start a saved listening scene. Configure scenes in the card under Smart. Failures report completed stages without replaying commands.
+  fields:
+    instance_id:
+      name: Engine instance ID
+      description: Select the Engine connection when more than one is configured. Leave empty for the default.
+      selector:
+        text:
+    scene_id:
+      name: Scene ID
+      description: Copy the ID shown in Smart → Listening scenes.
+      required: true
+      selector:
+        text:
+    profile_id:
+      name: HOMEii profile ID
+      default: default
+      selector:
+        text:

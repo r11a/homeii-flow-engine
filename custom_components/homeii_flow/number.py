@@ -33,7 +33,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up HOMEii Flow Engine number entities."""
-    runtime = async_get_runtime(hass)
+    runtime = async_get_runtime(hass, entry_id=entry.entry_id)
     profile_id = _profile_id(entry)
     known_volume_rules: dict[str, HomeiiFlowVolumeRuleNumber] = {}
     async_add_entities([HomeiiFlowScreensaverTimeoutNumber(runtime, entry, profile_id)])

@@ -10,6 +10,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
+from .instance_registry import resolve_runtime
 
 
 async def relay_frames(source, destination) -> None:
@@ -36,7 +37,7 @@ class HomeiiFlowSendspinView(HomeAssistantView):
     async def get(self, request: web.Request, client_id: str):
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", client_id):
             raise web.HTTPBadRequest(text="Invalid player id")
-        runtime = self.hass.data[DOMAIN]["runtime"]
+        runtime = resolve_runtime(self.hass.data[DOMAIN], request.query.get("instance_id"))
         urls = runtime.music_assistant_base_urls()
         tokens = runtime.music_assistant_tokens()
         if not urls or not tokens:
