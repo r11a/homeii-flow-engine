@@ -6020,10 +6020,16 @@ class HomeiiFlowRuntime:
             "attempts": attempts,
             "cache": {"hit": False, "ttl": 30},
         }
-        self._search_cache[cache_key] = (
-            time.monotonic() + 30,
-            result | {"cache": {"hit": True, "ttl": 30}},
-        )
+        # MA can return an empty provider response at its soft timeout while
+        # the search continues in the background. Do not mask its late result
+        # behind our own negative cache when the user retries.
+        if library_only or normalized["items"]:
+            self._search_cache[cache_key] = (
+                time.monotonic() + 30,
+                result | {"cache": {"hit": True, "ttl": 30}},
+            )
+        else:
+            result["cache"]["ttl"] = 0
         return result
 
     async def async_apply_group(self, payload: dict[str, Any]) -> dict[str, Any]:
